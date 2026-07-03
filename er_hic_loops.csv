@@ -1,0 +1,2 @@
+"source_chr,source_start,source_end,target_chr,target_start,target_end,score,type,target_gene"
+"13,48300000,48400000,13,48800000,48900000,0.80,HiC_loop,RB1"
