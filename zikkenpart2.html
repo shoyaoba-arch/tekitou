@@ -1,0 +1,1555 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>VR Chromosome + HR Toggle + STRING + start/end</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+
+  <!-- SheetJS（Excel読み取り用。CSVだけで良いなら消してもOK） -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.20.2/dist/xlsx.full.min.js"></script>
+
+  <style>
+    body { margin:0; background:#111; }
+    #info {
+      position: fixed; right: 10px; bottom: 10px;
+      background: rgba(0,0,0,0.78); color: #fff;
+      padding: 10px 14px; font-size: 13px; border-radius: 8px;
+      max-width: 560px; line-height: 1.45; font-family: sans-serif;
+      z-index: 999; white-space: normal;
+    }
+    #ui {
+      position: fixed; left: 10px; top: 10px;
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      background: rgba(0,0,0,0.55); padding: 10px 12px; border-radius: 10px;
+      z-index: 1000; font-family: sans-serif; color: #fff; user-select: none;
+      max-width: 1100px;
+    }
+    #ui button {
+      cursor: pointer; border: 0; padding: 8px 10px; border-radius: 8px;
+      background: #222; color: #fff; font-size: 13px;
+    }
+    #ui button:hover { background: #333; }
+    #ui button.active { outline: 2px solid rgba(255,255,255,0.45); }
+    #hopLabel { font-size: 13px; opacity: 0.95; }
+    .badge {
+      display:inline-block; padding:2px 8px; border-radius:999px;
+      background:#111; border:1px solid rgba(255,255,255,0.12);
+      margin-left:6px; font-size:12px; opacity:0.9;
+    }
+    .small { font-size: 12px; opacity: 0.9; }
+  </style>
+</head>
+
+<body>
+<div id="ui">
+  <button id="modeHRon"  class="active">色: HR（ET〇）</button>
+  <button id="modeHRoff">色: HR（ET×）</button>
+  <button id="modeDelta">色: ΔHR（>=0/ <0）</button>
+
+  <span class="badge" id="modeBadge">mode: HR(ET〇)</span>
+
+  <button id="hopPlus">+1 hop</button>
+  <button id="hopMinus">-1 hop</button>
+  <button id="resetAll">Reset</button>
+  <button id="enterVR">Enter VR</button>
+  <button id="afterSim">シミュレーション後</button>
+
+  <span id="hopLabel">hop: 1</span>
+  <span class="badge">layout: chromosome (real-ish)</span>
+  <span class="badge">pos: start/end mapped</span>
+  <span class="badge">edges: STRING</span>
+  <span class="small">※ file:// ではなく localhost 推奨</span>
+</div>
+
+<div id="info">ロード中…</div>
+
+<a-scene id="scene" vr-mode-ui="enabled: true">
+  <a-entity light="type: ambient; intensity: 2.4"></a-entity>
+  <a-entity light="type: directional; intensity: 1.1" position="1 2 1"></a-entity>
+
+  <a-entity id="rig" position="0 1.6 16" keyboard-move>
+    <a-entity id="cam" camera look-controls wasd-controls="acceleration: 20" position="0 0 0">
+      <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable; far: 250"></a-entity>
+    </a-entity>
+  </a-entity>
+
+  <a-sky color="#111"></a-sky>
+</a-scene>
+
+<script>
+/* ===============================
+   H: up / B: down
+=============================== */
+/* ===============================
+   CNA chromosome count
+=============================== */
+
+const chrCNAcount = {};
+AFRAME.registerComponent('keyboard-move', {
+  init() {
+    this.keys = {};
+    window.addEventListener('keydown', e => this.keys[e.code] = true);
+    window.addEventListener('keyup',   e => this.keys[e.code] = false);
+  },
+  tick(t, dt) {
+    const p = this.el.object3D.position;
+    const s = dt * 0.004;
+    if (this.keys['KeyH']) p.y += s;
+    if (this.keys['KeyB']) p.y -= s;
+  }
+});
+
+/* ===============================
+   ラベル前面
+=============================== */
+AFRAME.registerComponent('always-on-top-text', {
+  schema: { renderOrder: { type: 'number', default: 9999 } },
+  tick() {
+    const ro = this.data.renderOrder;
+    const obj = this.el.object3D;
+    if (!obj) return;
+    obj.renderOrder = ro;
+    obj.traverse((child) => {
+      child.renderOrder = ro;
+      if (child.material) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.forEach(m => {
+          m.depthTest = false;
+          m.depthWrite = false;
+          m.transparent = true;
+          m.needsUpdate = true;
+        });
+      }
+    });
+  }
+});
+
+/* ===============================
+   自前 line（aframe-line-component衝突回避）
+=============================== */
+AFRAME.registerComponent('vrline', {
+  schema: {
+    start: { type: 'vec3' },
+    end:   { type: 'vec3' },
+    color: { type: 'color', default: '#777' },
+    opacity: { type: 'number', default: 0.6 }
+  },
+  init() {
+    const material = new THREE.LineBasicMaterial({
+      color: new THREE.Color(this.data.color),
+      transparent: true,
+      opacity: this.data.opacity
+    });
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(6);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.line = new THREE.Line(geometry, material);
+    this.el.setObject3D('mesh', this.line);
+    this.update();
+  },
+  update() {
+    if (!this.line) return;
+    const { start, end, color, opacity } = this.data;
+    const pos = this.line.geometry.attributes.position.array;
+    pos[0]=start.x; pos[1]=start.y; pos[2]=start.z;
+    pos[3]=end.x;   pos[4]=end.y;   pos[5]=end.z;
+    this.line.geometry.attributes.position.needsUpdate = true;
+    this.line.material.color = new THREE.Color(color);
+    this.line.material.opacity = opacity;
+    this.line.material.needsUpdate = true;
+  },
+  remove() {
+    this.el.removeObject3D('mesh');
+  }
+});
+
+/* ===============================
+   helpers
+=============================== */
+/* ===============================
+   CNA (Fisher検定) 読み込み
+=============================== */
+async function loadCNA(){
+  try{
+    const txt = await fetchText('./fisher_exact_results.csv');
+    const rows = parseCSV(txt);
+
+    const cna = {};
+
+    rows.forEach(r=>{
+      const gene = keyUpper(r.Gene);
+      const p = Number(r.p_value);
+
+      if(!gene) return;
+
+      cna[gene] = {
+        p: p,
+        significant: (p <= 0.05)
+      };
+    });
+
+    return cna;
+
+  }catch(e){
+    console.warn("CNA file not found");
+    return {};
+  }
+}
+const info = document.getElementById('info');
+function safeNum(v, fallback=null){
+  const x = Number(v);
+  return Number.isFinite(x) ? x : fallback;
+}
+function keyUpper(x){ return String(x ?? '').trim().toUpperCase(); }
+function isBlank(v){ return v == null || String(v).trim() === ''; }
+
+// GRCh38の概算長（bp）: 1..22（座標を棒上にマッピング）
+const CHR_LEN = {
+  "1":248956422,"2":242193529,"3":198295559,"4":190214555,"5":181538259,"6":170805979,
+  "7":159345973,"8":145138636,"9":138394717,"10":133797422,"11":135086622,"12":133275309,
+  "13":114364328,"14":107043718,"15":101991189,"16":90338345,"17":83257441,"18":80373285,
+  "19":58617616,"20":64444167,"21":46709983,"22":50818468
+};
+function genomeCoordToVR(chr, start, end, tubes, layer = "gene") {
+  chr = String(chr).replace("chr", "");
+
+  const shape = chrShapeMap[chr];
+  if (!shape || !CHR_LEN[chr]) return null;
+
+  const mid = (Number(start) + Number(end)) / 2;
+  const t = clamp01(mid / CHR_LEN[chr]);
+
+  const arm =
+    shape.arms.find(a => t >= a.startT && t <= a.endT) ||
+    shape.arms[0];
+
+  const localT = (t - arm.startT) / (arm.endT - arm.startT);
+  const p = arm.curve.getPointAt(localT);
+
+  const seed = Math.sin(mid * 0.00001) * 10000;
+  const rand1 = seed - Math.floor(seed);
+  const rand2 = Math.sin(seed * 3.17) * 10000;
+  const rand3 = rand2 - Math.floor(rand2);
+
+  const theta = rand1 * Math.PI * 2;
+
+  const radius =
+    Math.sqrt(rand3) *
+    shape.armR *
+    (layer === "loop" ? 0.15 : 0.65);
+
+  const offset = new THREE.Vector3(
+    Math.cos(theta) * radius,
+    Math.sin(theta) * radius,
+    Math.sin(t * 40) * shape.armR * 0.12
+  );
+
+  return {
+    x: shape.cx + p.x + offset.x,
+    y: shape.cy + p.y + offset.y,
+    z: shape.cz + p.z + offset.z
+  };
+}
+function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+function lerp(a,b,t){ return a + (b-a)*t; }
+
+/* ===============================
+   データ列名の自動検出
+=============================== */
+function pickCol(rowObj, candidates){
+  // candidates: ["display","Display","gene",...]
+  for (const c of candidates){
+    if (rowObj[c] != null && !isBlank(rowObj[c])) return c;
+    // 大文字小文字を無視
+    const hit = Object.keys(rowObj).find(k => k.toLowerCase() === c.toLowerCase());
+    if (hit && !isBlank(rowObj[hit])) return hit;
+  }
+  return null;
+}
+
+function findColFuzzy(rowObj, regexList){
+  const keys = Object.keys(rowObj);
+  for (const re of regexList){
+    const hit = keys.find(k => re.test(k));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/* ===============================
+   色モード
+=============================== */
+const ColorMode = {
+  HR_ON:  "HR_ON",
+  HR_OFF: "HR_OFF",
+  DELTA:  "DELTA"
+};
+let colorMode = ColorMode.HR_ON;
+
+function colorForGene(node){
+  // node: {hr_on, hr_off, deltaHR}
+  if (colorMode === ColorMode.DELTA){
+    const d = safeNum(node.deltaHR, null);
+    if (d == null) return '#33CC66';           // NA
+    return (d >= 0) ? '#FF3333' : '#3366FF';   // >=0 赤 / <0 青
+  }
+  const hr = (colorMode === ColorMode.HR_ON) ? safeNum(node.hr_on, null) : safeNum(node.hr_off, null);
+  if (hr == null) return '#33CC66';           // NA
+  return (hr >= 1.0) ? '#FF3333' : '#3366FF'; // >=1 赤 / <1 青
+}
+
+function modeLabel(){
+  if (colorMode === ColorMode.HR_ON)  return 'HR(ET〇)';
+  if (colorMode === ColorMode.HR_OFF) return 'HR(ET×)';
+  return 'ΔHR(>=0/<0)';
+}
+
+/* ===============================
+   染色体モデル（あなたのデザインを踏襲）
+=============================== */
+
+function colorForChromosome(chrNum) {
+  const colors = [
+    '#8F6AFF', '#FF6B6B', '#4D96FF', '#6BCB77', '#FFD93D',
+    '#FF9F1C', '#B983FF', '#00C2A8', '#F15BB5', '#9B5DE5',
+    '#00BBF9', '#FEE440', '#EF476F', '#06D6A0', '#118AB2',
+    '#FFB703', '#FB8500', '#8338EC', '#3A86FF', '#FF006E',
+    '#A7C957', '#BC6C25'
+  ];
+
+  return colors[(Number(chrNum) - 1) % colors.length];
+}
+
+const chrShapeMap = {};
+
+function drawRealisticChromosome(scene, chrNum, cx, cy, cz, chrLen, chrR, chrCNAcount) {
+  const group = document.createElement('a-entity');
+  group.setAttribute('id', `chrGroup_${chrNum}`);
+  group.setAttribute('position', `${cx} ${cy} ${cz}`);
+  scene.appendChild(group);
+  const chrColor = colorForChromosome(chrNum);
+
+  const armLen = chrLen * 0.42;
+  const armR = chrR * 0.55;
+
+  const armData = [
+    {
+      name: 'p1',
+      startT: 0.00,
+      endT: 0.25,
+      points: [
+        [-armLen * 0.95,  armLen * 0.95, 0.00],
+        [-armLen * 0.55,  armLen * 0.45, 0.15],
+        [-armLen * 0.18,  armLen * 0.12, 0.05],
+        [0, 0, 0]
+      ]
+    },
+    {
+      name: 'p2',
+      startT: 0.25,
+      endT: 0.50,
+      points: [
+        [0, 0, 0],
+        [armLen * 0.18,  armLen * 0.12, -0.05],
+        [armLen * 0.55,  armLen * 0.45,  0.10],
+        [armLen * 0.95,  armLen * 0.95,  0.00]
+      ]
+    },
+    {
+      name: 'q1',
+      startT: 0.50,
+      endT: 0.75,
+      points: [
+        [-armLen * 0.95, -armLen * 0.95, 0.00],
+        [-armLen * 0.55, -armLen * 0.45, -0.15],
+        [-armLen * 0.18, -armLen * 0.12, -0.05],
+        [0, 0, 0]
+      ]
+    },
+    {
+      name: 'q2',
+      startT: 0.75,
+      endT: 1.00,
+      points: [
+        [0, 0, 0],
+        [armLen * 0.18, -armLen * 0.12,  0.05],
+        [armLen * 0.55, -armLen * 0.45, -0.10],
+        [armLen * 0.95, -armLen * 0.95,  0.00]
+      ]
+    }
+  ];
+
+  chrShapeMap[String(chrNum)] = {
+    cx, cy, cz,
+    chrLen,
+    chrR,
+    armLen,
+    armR,
+    arms: []
+  };
+
+  armData.forEach((a, index) => {
+    const curve = new THREE.CatmullRomCurve3(
+      a.points.map(p => new THREE.Vector3(p[0], p[1], p[2]))
+    );
+
+    chrShapeMap[String(chrNum)].arms.push({
+      name: a.name,
+      startT: a.startT,
+      endT: a.endT,
+      curve
+    });
+
+    const geometry = new THREE.TubeGeometry(
+      curve,
+      180,
+      armR,
+      32,
+      false
+    );
+
+    addChromosomeSurfaceNoise(geometry, index);
+
+    const material = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(chrColor),
+      roughness: 0.9,
+      metalness: 0.03,
+      emissive: 0x18002f,
+      emissiveIntensity: 0.45
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    group.object3D.add(mesh);
+
+    createChromosomeBands(group, curve, armR);
+  });
+
+  const centerGeo = new THREE.SphereGeometry(chrR * 0.85, 32, 32);
+  const centerMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(chrColor)
+,
+    roughness: 1,
+    metalness: 0,
+    emissive: 0x230033,
+    emissiveIntensity: 0.7
+  });
+
+  const center = new THREE.Mesh(centerGeo, centerMat);
+  center.scale.set(1.0, 0.75, 0.75);
+  group.object3D.add(center);
+
+  const cnaCount = chrCNAcount?.[chrNum] || 0;
+
+  if (cnaCount > 0) {
+    group.setAttribute('animation__pulse', {
+      property: 'scale',
+      dir: 'alternate',
+      dur: 1000,
+      loop: true,
+      to: '1.04 1.04 1.04'
+    });
+  }
+
+  return group;
+}
+
+function addChromosomeSurfaceNoise(geometry, seed) {
+  const pos = geometry.attributes.position;
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+
+    const n =
+      Math.sin(x * 14 + seed) *
+      Math.sin(y * 12 + seed * 2) *
+      Math.sin(z * 10 + seed * 3);
+
+    const scale = 1 + n * 0.075;
+
+    pos.setXYZ(i, x * scale, y * scale, z * scale);
+  }
+
+  pos.needsUpdate = true;
+  geometry.computeVertexNormals();
+}
+
+function createChromosomeBands(group, curve, armR) {
+  for (let t = 0.15; t < 0.95; t += 0.18) {
+    const p = curve.getPointAt(t);
+
+    const bandGeo = new THREE.TorusGeometry(
+      armR * 1.03,
+      armR * 0.045,
+      8,
+      48
+    );
+
+    const bandMat = new THREE.MeshStandardMaterial({
+      color: 0xd8b8ff,
+      transparent: true,
+      opacity: 0.35,
+      emissive: 0x442266,
+      emissiveIntensity: 0.35
+    });
+
+    const band = new THREE.Mesh(bandGeo, bandMat);
+    band.position.copy(p);
+    band.rotation.x = Math.PI / 2;
+
+    group.object3D.add(band);
+  }
+}
+
+function drawChromosomeModel(scene, chrNum, cx, cy, cz, chrLen, chrR, chrCNAcount){
+  const group = document.createElement('a-entity');
+  group.setAttribute('id', `chrGroup_${chrNum}`);
+  group.setAttribute('position', `${cx} ${cy} ${cz}`);
+  scene.appendChild(group);
+
+  // 本体：リアル染色体風の管
+  const body = document.createElement('a-cylinder');
+  body.setAttribute('position', `0 0 0`);
+  body.setAttribute('rotation', '0 0 90');
+  body.setAttribute('height', String(chrLen));
+  body.setAttribute('radius', String(chrR));
+  body.setAttribute('segments-radial', '48');
+  body.setAttribute('segments-height', '64');
+  body.setAttribute('color', '#7B5CB8');
+  body.setAttribute('material', `
+    color: #7B5CB8;
+    roughness: 1;
+    metalness: 0;
+    emissive: #2A174A;
+    emissiveIntensity: 0.35
+  `);
+  group.appendChild(body);
+
+  // 両端を丸くする
+  [-1, 1].forEach(side => {
+    const end = document.createElement('a-sphere');
+    end.setAttribute('position', `${side * chrLen / 2} 0 0`);
+    end.setAttribute('radius', String(chrR));
+    end.setAttribute('segments-width', '48');
+    end.setAttribute('segments-height', '32');
+    end.setAttribute('color', '#7B5CB8');
+    end.setAttribute('material', `
+      color: #7B5CB8;
+      roughness: 1;
+      metalness: 0;
+      emissive: #2A174A;
+      emissiveIntensity: 0.35
+    `);
+    group.appendChild(end);
+  });
+
+  // 表面の粒々・クロマチンっぽい凹凸
+  const dotCount = Math.floor(chrLen * 45);
+
+  for (let i = 0; i < dotCount; i++) {
+    const x = (Math.random() - 0.5) * chrLen;
+    const angle = Math.random() * Math.PI * 2;
+
+    const r = chrR * (0.95 + Math.random() * 0.25);
+    const y = Math.cos(angle) * r;
+    const z = Math.sin(angle) * r;
+
+    const dot = document.createElement('a-sphere');
+    dot.setAttribute('position', `${x} ${y} ${z}`);
+    dot.setAttribute('radius', String(chrR * (0.06 + Math.random() * 0.08)));
+    dot.setAttribute('color', Math.random() > 0.5 ? '#9C7AE6' : '#5C4699');
+    dot.setAttribute('material', `
+      roughness: 1;
+      metalness: 0;
+      emissive: #2A174A;
+      emissiveIntensity: 0.25
+    `);
+    group.appendChild(dot);
+  }
+
+  // バンドを薄く残す
+  const bandCount = Math.max(8, Math.floor(chrLen * 1.4));
+
+  for (let i = 0; i < bandCount; i++) {
+    const t = (i + 1) / (bandCount + 1);
+    const x = -chrLen / 2 + chrLen * t;
+
+    const band = document.createElement('a-torus');
+    band.setAttribute('position', `${x} 0 0`);
+    band.setAttribute('rotation', '0 90 0');
+    band.setAttribute('radius', String(chrR * 1.02));
+    band.setAttribute('radius-tubular', String(chrR * 0.035));
+    band.setAttribute('color', i % 2 === 0 ? '#C9B6FF' : '#3D2F66');
+    band.setAttribute('opacity', '0.35');
+    band.setAttribute('transparent', 'true');
+    group.appendChild(band);
+  }
+
+  // CNAがある染色体は赤く少し発光
+  const cnaCount = chrCNAcount[chrNum] || 0;
+  if (cnaCount > 0) {
+    group.setAttribute('animation__pulse', {
+      property: 'scale',
+      dir: 'alternate',
+      dur: 1000,
+      loop: true,
+      to: '1.04 1.04 1.04'
+    });
+  }
+}
+
+/* ===============================
+   Chromosome layout (chr1..22)
+=============================== */
+function drawChromosomeTubes(scene, opts = {}) {
+  const {
+    cols = 2, rows = 11,
+    tubeR = 0.90, rodLen = 11.8,
+    xGap = 11.5, yTop = 7.0,
+    yStep = null, zPlane = 0.0,
+    zStagger = 2.6, padding = 3.0
+  } = opts;
+
+  const autoStep = Math.max(
+    rodLen * 0.65,
+    (2 * tubeR) + padding
+);
+  const step = (yStep == null) ? autoStep : Math.max(yStep, autoStep);
+
+  const tubes = {};
+  for (let c=0; c<cols; c++){
+    for (let r=0; r<rows; r++){
+      const chrNum = String(c*rows + r + 1);
+      if (Number(chrNum) > 22) continue;
+
+      const cx = (c === 0) ? -xGap : xGap;
+      const cy = yTop - r * step;
+      const cz = zPlane + ((r % 2 === 0) ? 0 : zStagger);
+
+      const baseLen = rodLen;
+      const scaleByChr = 1.25 - (Number(chrNum)-1) * (0.45/21);
+      const chrLen = baseLen * Math.max(0.75, scaleByChr);
+      const chrR  = tubeR * (0.95 + Math.random()*0.10);
+
+      drawRealisticChromosome(scene, chrNum, cx, cy, cz, chrLen, chrR, chrCNAcount);
+
+      const xEndLeft = cx - chrLen/2 - 1.0;
+      const lbl = document.createElement('a-entity');
+      lbl.setAttribute('position', `${xEndLeft} ${cy} ${cz}`);
+      lbl.setAttribute('text', { value: `chr${chrNum}`, align: 'center', color: '#FFFFFF', width: 6 });
+      lbl.setAttribute('look-at', '#cam');
+      lbl.setAttribute('always-on-top-text', 'renderOrder: 9999');
+      scene.appendChild(lbl);
+
+      tubes[chrNum] = { cx, cy, cz, chrLen, tubeR: chrR };
+    }
+  }
+  return tubes;
+}
+
+/* ===============================
+   start/end で “染色体内位置” を再現
+   x = tubeの端→端 に (midBP / chrLenBP) を写像
+   断面(y,z)は半径内で軽く散らす
+=============================== */
+function layoutGenesByStartEnd(pos, geneData, tubes) {
+  Object.keys(geneData).forEach(id => {
+    const n = geneData[id];
+
+    if (!n || !n.chr || !n.start || !n.end) {
+      pos[id] = {
+        x: (Math.random() - 0.5) * 2,
+        y: (Math.random() - 0.5) * 2,
+        z: (Math.random() - 0.5) * 2
+      };
+      return;
+    }
+
+    const p = genomeCoordToVR(n.chr, n.start, n.end, tubes, "gene");
+
+    if (p) {
+      pos[id] = p;
+    } else {
+      pos[id] = {
+        x: (Math.random() - 0.5) * 2,
+        y: (Math.random() - 0.5) * 2,
+        z: (Math.random() - 0.5) * 2
+      };
+    }
+  });
+}
+
+/* ===============================
+   draw utils（エッジ＋矢印/T-bar）
+=============================== */
+function drawLine(scene, a, b, color = '#777', opacity = 0.45) {
+  const mid = new THREE.Vector3(
+    (a.x + b.x) / 2,
+    (a.y + b.y) / 2 + 0.8,
+    (a.z + b.z) / 2
+  );
+
+  const curve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(a.x, a.y, a.z),
+    mid,
+    new THREE.Vector3(b.x, b.y, b.z)
+  ]);
+
+  const points = curve.getPoints(40);
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+
+  const material = new THREE.LineBasicMaterial({
+    color: new THREE.Color(color),
+    transparent: true,
+    opacity: opacity,
+    depthTest: false,
+    depthWrite: false
+  });
+
+  const line = new THREE.Line(geometry, material);
+  line.renderOrder = 9998;
+
+  const e = document.createElement('a-entity');
+  e.setObject3D('mesh', line);
+  scene.appendChild(e);
+
+  e.updateCurve = function(start, end) {
+    const newMid = new THREE.Vector3(
+      (start.x + end.x) / 2,
+      (start.y + end.y) / 2 + 0.8,
+      (start.z + end.z) / 2
+    );
+
+    const newCurve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(start.x, start.y, start.z),
+      newMid,
+      new THREE.Vector3(end.x, end.y, end.z)
+    ]);
+
+    const newPoints = newCurve.getPoints(40);
+    const pos = line.geometry.attributes.position;
+
+    for (let i = 0; i < newPoints.length; i++) {
+      pos.setXYZ(i, newPoints[i].x, newPoints[i].y, newPoints[i].z);
+    }
+
+    pos.needsUpdate = true;
+  };
+
+  return e;
+}
+
+function drawArrowCenter(scene, from, to, color='#00FFFF') {
+  const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+  const L = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  if (L < 1e-6) return [];
+  const dir = new THREE.Vector3(dx/L, dy/L, dz/L);
+  const mid = new THREE.Vector3((from.x+to.x)/2, (from.y+to.y)/2, (from.z+to.z)/2);
+
+  let up = new THREE.Vector3(0,1,0);
+  if (Math.abs(dir.dot(up)) > 0.9) up = new THREE.Vector3(1,0,0);
+  const v = new THREE.Vector3().crossVectors(dir, up).normalize();
+
+  const back=0.9, wide=0.6, thick=0.03;
+  const tip=mid.clone();
+  const base=tip.clone().addScaledVector(dir, -back);
+  const left=base.clone().addScaledVector(v,  wide);
+  const right=base.clone().addScaledVector(v, -wide);
+  const off=v.clone().multiplyScalar(thick);
+
+  const els=[];
+  const mk=(a,b)=>{ const e=document.createElement('a-entity');
+    e.setAttribute('vrline', { start: a, end: b, color, opacity: 1.0 });
+    scene.appendChild(e); els.push(e);
+  };
+  mk(tip,left); mk(tip.clone().add(off), left.clone().add(off));
+  mk(tip,right); mk(tip.clone().add(off), right.clone().add(off));
+  return els;
+}
+
+function drawTbarCenter(scene, from, to, color='#FF4444') {
+  const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z;
+  const L = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  if (L < 1e-6) return [];
+  const dir = new THREE.Vector3(dx/L, dy/L, dz/L);
+  const mid = new THREE.Vector3((from.x+to.x)/2, (from.y+to.y)/2, (from.z+to.z)/2);
+
+  let up = new THREE.Vector3(0,1,0);
+  if (Math.abs(dir.dot(up)) > 0.9) up = new THREE.Vector3(1,0,0);
+  const p = new THREE.Vector3().crossVectors(dir, up).normalize();
+
+  const barLen = 1.2;
+  const a = mid.clone().addScaledVector(p, -barLen/2);
+  const b = mid.clone().addScaledVector(p,  barLen/2);
+
+  const e = document.createElement('a-entity');
+  e.setAttribute('vrline', { start: a, end: b, color, opacity: 1.0 });
+  scene.appendChild(e);
+  return [e];
+}
+
+/* ===============================
+   k-hop
+=============================== */
+function kHopNodes(startId, adjacency, k) {
+  const seen = new Set([startId]);
+  let frontier = [startId];
+  for (let depth = 0; depth < k; depth++) {
+    const next = [];
+    for (const u of frontier) {
+      const nb = adjacency[u] || [];
+      for (const v of nb) {
+        if (!seen.has(v)) { seen.add(v); next.push(v); }
+      }
+    }
+    frontier = next;
+    if (frontier.length === 0) break;
+  }
+  return seen;
+}
+
+/* ===============================
+   ファイル読み込み（Excel or CSV）
+=============================== */
+async function fetchText(path){
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${path} load failed: ${res.status}`);
+  return await res.text();
+}
+
+function parseCSV(csvText){
+  const lines = csvText.split(/\r?\n/).filter(l => l.trim().length>0);
+  const header = lines[0].split(',').map(x=>x.trim());
+  const rows = [];
+  for (let i=1; i<lines.length; i++){
+    const cols = lines[i].split(','); // 簡易（カンマ含みの厳密CSVは別途対応可）
+    const obj = {};
+    header.forEach((h, j) => obj[h] = (cols[j] ?? '').trim());
+    rows.push(obj);
+  }
+  return rows;
+}
+
+async function loadLoops() {
+  try {
+    const txt = await fetchText('./er_hic_loops.csv');
+    return parseCSV(txt);
+  } catch (e) {
+    console.warn("Hi-C loop file not found");
+    return [];
+  }
+}
+
+async function loadERBedLoops() {
+  try {
+    const txt = await fetchText('./IHM096M.ChromatinInteractons.bed');
+    const lines = txt.split(/\r?\n/).filter(l => l.trim().length > 0);
+
+    const loopMap = {};
+
+    lines.forEach(line => {
+      const cols = line.split(/\t/);
+      if (cols.length < 4) return;
+
+      const chr = cols[0].replace("chr", "");
+      const start = Number(cols[1]);
+      const end = Number(cols[2]);
+      const loopName = cols[3];
+
+      if (!loopMap[loopName]) loopMap[loopName] = [];
+      loopMap[loopName].push({ chr, start, end });
+    });
+
+    const loops = [];
+
+    Object.values(loopMap).forEach(pair => {
+      if (pair.length < 2) return;
+
+      loops.push({
+        source_chr: pair[0].chr,
+        source_start: pair[0].start,
+        source_end: pair[0].end,
+        target_chr: pair[1].chr,
+        target_start: pair[1].start,
+        target_end: pair[1].end,
+        type: "ER_loop"
+      });
+    });
+
+    return loops;
+
+  } catch (e) {
+    console.warn("ENCFF001TIB.bed not found");
+    return [];
+  }
+}
+
+function overlapsGene(loopAnchor, gene, windowBp = 100000) {
+  if (!gene.chr || gene.start == null || gene.end == null) return false;
+
+  const chr = String(gene.chr).replace("chr", "");
+  if (String(loopAnchor.chr) !== chr) return false;
+
+  return (
+    loopAnchor.end >= gene.start - windowBp &&
+    loopAnchor.start <= gene.end + windowBp
+  );
+}
+
+async function loadTable(){
+  // 優先：Excel（あれば）
+  try{
+    const xres = await fetch('./sabun_final.xlsx', { cache: "no-store" });
+    if (xres.ok){
+      const buf = await xres.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      return { rows, source: 'sabun_final.xlsx' };
+    }
+  }catch(e){ /* ignore */ }
+
+  // fallback：CSV
+  const csv = await fetchText('./sabun_final.csv');
+  return { rows: parseCSV(csv), source: 'sabun_final.csv' };
+}
+
+/* ===============================
+   Ensembl で chr/start/end を一括取得
+   - 失敗した遺伝子はスキップ
+=============================== */
+async function ensemblLookupBatch(symbols){
+  // POST /lookup/symbol/homo_sapiens
+  // body: { "symbols": ["BRCA1","TP53",...] }
+  const url = `https://rest.ensembl.org/lookup/symbol/homo_sapiens?content-type=application/json`;
+  const body = JSON.stringify({ symbols });
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body
+  });
+  if (!res.ok){
+    const t = await res.text().catch(()=> '');
+    throw new Error(`Ensembl lookup failed: ${res.status} ${t}`);
+  }
+  return await res.json();
+}
+
+/* ===============================
+   STRING でエッジ取得（ネットワーク）
+=============================== */
+async function fetchStringNetwork(symbols, opts={}){
+  // 公式：/api/json/network?identifiers=...&species=9606
+  // identifiersは改行区切り推奨（%0d）
+  const {
+    requiredScore = 700, // 0-1000（厳しめ）
+    addNodes = 0,        // 0 = 追加ノードなし（自分の遺伝子集合内に限定しやすい）
+    caller = 'vr-local'
+  } = opts;
+
+  const ids = symbols.map(encodeURIComponent).join('%0d');
+  const url = `https://string-db.org/api/json/network?identifiers=${ids}&species=9606&required_score=${requiredScore}&add_nodes=${addNodes}&caller_identity=${encodeURIComponent(caller)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok){
+    const t = await res.text().catch(()=> '');
+    throw new Error(`STRING network failed: ${res.status} ${t}`);
+  }
+  return await res.json();
+}
+
+/* ===============================
+   MAIN
+=============================== */
+async function init(){
+  const scene = document.querySelector('#scene');
+  const modeBadge = document.getElementById('modeBadge');
+
+  // UI
+  const btnHRon  = document.getElementById('modeHRon');
+  const btnHRoff = document.getElementById('modeHRoff');
+  const btnDelta = document.getElementById('modeDelta');
+  const hopPlus  = document.getElementById('hopPlus');
+  const hopMinus = document.getElementById('hopMinus');
+  const resetAll = document.getElementById('resetAll');
+  const hopLabel = document.getElementById('hopLabel');
+  const enterVR  = document.getElementById('enterVR');
+  const afterSim = document.getElementById('afterSim');
+  enterVR.addEventListener('click', () => scene.enterVR());
+
+  function setActiveMode(mode){
+    colorMode = mode;
+    btnHRon.classList.toggle('active', mode===ColorMode.HR_ON);
+    btnHRoff.classList.toggle('active', mode===ColorMode.HR_OFF);
+    btnDelta.classList.toggle('active', mode===ColorMode.DELTA);
+    modeBadge.textContent = `mode: ${modeLabel()}`;
+    recolorAll();
+  }
+  btnHRon.addEventListener('click',  ()=>setActiveMode(ColorMode.HR_ON));
+  btnHRoff.addEventListener('click', ()=>setActiveMode(ColorMode.HR_OFF));
+  btnDelta.addEventListener('click', ()=>setActiveMode(ColorMode.DELTA));
+
+  info.innerHTML = `データ読み込み中…`;
+
+  // 1) 表（Excel/CSV）ロード
+  const { rows, source } = await loadTable();
+  // CNAデータ読み込み
+  const cnaData = await loadCNA();
+  if (!rows || rows.length === 0) throw new Error('表データが空です（sabun_final.xlsx/csv を確認）');
+
+  // 列名推定
+  const probe = rows[0];
+  const colGene = pickCol(probe, ['display','Display','gene','Gene','SYMBOL','symbol','GeneSymbol','name','Name'])
+               || findColFuzzy(probe, [/display/i,/symbol/i,/gene/i,/名称/,/遺伝子/]);
+  if (!colGene) throw new Error('遺伝子名列が見つかりません（display / gene / SYMBOL 等の列を用意）');
+
+  const colHRon  = findColFuzzy(probe, [/HR.*内分泌.*[〇○]/, /HR.*ET.*on/i, /HR.*treat/i, /HR.*あり/, /HR.*yes/i]);
+  const colHRoff = findColFuzzy(probe, [/HR.*内分泌.*[×✕]/, /HR.*ET.*off/i, /HR.*untreat/i, /HR.*なし/, /HR.*no/i]);
+  const colDelta = findColFuzzy(probe, [/deltaHR/i, /ΔHR/, /dHR/i, /diff.*HR/i, /差.*HR/]);
+
+  // 遺伝子→データ
+  const geneData = {}; // symbol -> {symbol, hr_on, hr_off, deltaHR, chr, start, end}
+  rows.forEach(r=>{
+    const sym = String(r[colGene] ?? '').trim();
+    if (!sym) return;
+
+    const symbol = sym.toUpperCase();
+    if (!/^[A-Z0-9_.-]+$/.test(symbol)) return; // 変なのは落とす（Ensembl 400回避）
+
+    geneData[symbol] = {
+        symbol,
+        hr_on:  colHRon  ? safeNum(r[colHRon],  null) : null,
+        hr_off: colHRoff ? safeNum(r[colHRoff], null) : null,
+        deltaHR: colDelta ? safeNum(r[colDelta], null) : null,
+
+        chr: null,
+        start: null,
+        end: null,
+
+        cna: cnaData[symbol]?.significant || false,
+        cna_p: cnaData[symbol]?.p ?? null
+    };
+  });
+
+  const genes = Object.keys(geneData);
+  genes.forEach(g=>{
+
+  const n = geneData[g];
+
+  if(!n.chr) return;
+
+  if(!chrCNAcount[n.chr]) chrCNAcount[n.chr] = 0;
+
+  if(n.cna) chrCNAcount[n.chr]++;
+
+  });
+  /* ===============================
+   CNA chromosome count
+=============================== */
+
+  const chrCNAcount = {};
+
+  genes.forEach(g=>{
+   const n = geneData[g];
+   if(!n.chr) return;
+
+   if(!chrCNAcount[n.chr]) chrCNAcount[n.chr] = 0;
+
+   if(n.cna) chrCNAcount[n.chr]++;
+  });
+  if (genes.length === 0) throw new Error('遺伝子が0件です（display列の中身を確認）');
+
+  info.innerHTML =
+    `Loaded ✅<br>table: ${source}<br>genes: ${genes.length}<br>` +
+    `<span class="badge">geneCol: ${colGene}</span>` +
+    `<span class="badge">HR(ET〇): ${colHRon ?? 'NA'}</span>` +
+    `<span class="badge">HR(ET×): ${colHRoff ?? 'NA'}</span>` +
+    `<span class="badge">deltaHR: ${colDelta ?? 'NA'}</span>`;
+
+  // 2) Ensemblで chr/start/end を一括取得
+  let mapped = 0;
+  try{
+    const resp = await ensemblLookupBatch(genes);
+    genes.forEach(g=>{
+      const x = resp[g];
+      if (!x) return;
+      const chr = String(x.seq_region_name ?? '').trim();
+      const start = safeNum(x.start, null);
+      const end   = safeNum(x.end, null);
+      if (!CHR_LEN[chr] || start==null || end==null) return;
+      geneData[g].chr = chr;
+      geneData[g].start = start;
+      geneData[g].end = end;
+      mapped++;
+    });
+  }catch(e){
+    console.warn(e);
+    info.innerHTML += `<br><span class="badge">Ensembl: failed</span>`;
+  }
+  info.innerHTML += `<br><span class="badge">pos mapped (chr/start/end): ${mapped}</span>`;
+
+  // 3) 染色体描画
+  const tubes = drawChromosomeTubes(scene, {
+    tubeR: 0.90, rodLen: 11.8, xGap: 11.5, yTop: 7.0,
+    yStep: null, zPlane: 0.0, zStagger: 2.6, padding: 0.9
+  });
+
+const erLoops = await loadERBedLoops();
+
+const erLoopMeta = [];
+let drawnERLoops = 0;
+
+erLoops.forEach(r => {
+  const anchorA = {
+    chr: r.source_chr,
+    start: r.source_start,
+    end: r.source_end
+  };
+
+  const anchorB = {
+    chr: r.target_chr,
+    start: r.target_start,
+    end: r.target_end
+  };
+
+  let hitGene = null;
+
+  for (const g of genes) {
+    const gene = geneData[g];
+
+    if (
+      overlapsGene(anchorA, gene, 100000) ||
+      overlapsGene(anchorB, gene, 100000)
+    ) {
+      hitGene = g;
+      break;
+    }
+  }
+
+  if (!hitGene) return;
+
+const a = genomeCoordToVR(r.source_chr, r.source_start, r.source_end, tubes, "loop");
+const b = genomeCoordToVR(r.target_chr, r.target_start, r.target_end, tubes, "loop");
+
+  if (!a || !b) return;
+
+const greenLine = drawLine(scene, a, b, '#00FF99', 0.9);
+
+setTimeout(() => {
+  const obj = greenLine.getObject3D('mesh');
+  if (obj) {
+    obj.renderOrder = 9999;
+    obj.material.depthTest = false;
+    obj.material.depthWrite = false;
+  }
+}, 0);
+
+erLoopMeta.push({
+  line: greenLine,
+  source: hitGene,
+  target: hitGene
+});
+
+drawnERLoops++;
+});
+
+info.innerHTML += `<br><span class="badge">ER loops drawn: ${drawnERLoops}</span>`;
+
+  // 4) 座標配置（start/end → x）
+  const pos = {};
+  layoutGenesByStartEnd(pos, geneData, tubes, { margin: 0.7, radialJitter: 1.0, axialJitter: 0.08 });
+
+  // 5) STRINGでエッジ取得（全遺伝子間）
+  info.innerHTML += `<br>STRING取得中…`;
+  let stringEdges = [];
+  try{
+    // 大規模だとURL長制限等にかかるので、必要なら分割する
+    // ここでは 200遺伝子超なら requiredScoreを上げて負荷を落とす
+    const requiredScore = (genes.length > 200) ? 800 : 700;
+
+    // identifiersが多すぎる場合に備えて分割（簡易）
+    const chunks = [];
+    const chunkSize = 180; // 安全寄り
+    for (let i=0; i<genes.length; i+=chunkSize) chunks.push(genes.slice(i, i+chunkSize));
+
+    const all = [];
+    for (const ch of chunks){
+      const res = await fetchStringNetwork(ch, { requiredScore, addNodes: 0, caller: 'vr-local' });
+      all.push(...res);
+    }
+    // 重複除去（preferredName_A/B でキー）
+    const seen = new Set();
+    stringEdges = all.filter(e=>{
+      const a = String(e.preferredName_A ?? '').toUpperCase();
+      const b = String(e.preferredName_B ?? '').toUpperCase();
+      if (!a || !b) return false;
+      const k = (a < b) ? `${a}|${b}` : `${b}|${a}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+
+    info.innerHTML += `<br><span class="badge">STRING edges: ${stringEdges.length}</span>`;
+  }catch(e){
+    console.warn(e);
+    info.innerHTML += `<br><span class="badge">STRING: failed</span>`;
+  }
+
+  // 6) ノード描画
+  const nodeMeta = {}; // symbol -> {sphere,label,baseEm}
+  genes.forEach(g=>{
+    const p = pos[g];
+    const n = geneData[g];
+
+    const col = colorForGene(n);
+    const r = 0.18;
+   // CNA遺伝子は強調
+    let scale = "1 1 1";
+    let emissivePower = 0.55;
+
+    if(n.cna){
+        scale = "1.6 1.6 1.6";
+        emissivePower = 2.2;
+    }
+    const sphere = document.createElement('a-sphere');
+    sphere.setAttribute('position', `${p.x} ${p.y} ${p.z}`);
+    sphere.setAttribute('radius', String(r));
+    sphere.setAttribute('color', col);
+    sphere.setAttribute('emissive', col);
+    sphere.setAttribute('emissive-intensity', emissivePower);
+    sphere.setAttribute('scale', scale);
+    sphere.setAttribute('data-id', g);
+    sphere.classList.add('clickable');
+    scene.appendChild(sphere);
+
+    const label = document.createElement('a-entity');
+    label.setAttribute('position', `${p.x} ${p.y + r + 0.22} ${p.z}`);
+    label.setAttribute('text', { value: g, align: 'center', color: '#FFFFFF', width: 4, wrapCount: 14 });
+    label.setAttribute('look-at', '#cam');
+    label.setAttribute('always-on-top-text', 'renderOrder: 9999');
+    scene.appendChild(label);
+
+    nodeMeta[g] = { sphere, label, baseEm: 0.55 };
+  });
+
+  // 7) エッジ描画（STRING）
+  const adjacency = {};
+  genes.forEach(g=>adjacency[g]=[]);
+  const edgeMeta = [];
+
+  function edgeEffectFromScore(score){
+    // ここは“矢印/抑制”がSTRINGには基本無いので、代替として
+    // score高い→強調するだけ（矢印は無し）
+    return (score >= 900) ? 'strong' : 'normal';
+  }
+
+  stringEdges.forEach(e=>{
+    const a = String(e.preferredName_A ?? '').toUpperCase();
+    const b = String(e.preferredName_B ?? '').toUpperCase();
+    if (!pos[a] || !pos[b]) return;
+
+    adjacency[a].push(b);
+    adjacency[b].push(a);
+
+    const s = pos[a], t = pos[b];
+    const score = safeNum(e.score, 0) * 1000; // STRING jsonは0-1のことが多い
+
+    const line = drawLine(scene, s, t, '#777', 0.45);
+    const eff = edgeEffectFromScore(score);
+    const markers = (eff === 'strong') ? drawArrowCenter(scene, s, t, '#FFFF55') : [];
+    edgeMeta.push({ line, markers, source: a, target: b });
+  });
+
+  // 8) info表示
+  function showInfo(sym){
+    const n = geneData[sym];
+    if (!n) return;
+    const chr = n.chr ? `chr${n.chr}` : 'NA';
+    const hrOn  = (n.hr_on  == null) ? 'NA' : Number(n.hr_on).toFixed(3);
+    const hrOff = (n.hr_off == null) ? 'NA' : Number(n.hr_off).toFixed(3);
+    const dhr   = (n.deltaHR== null) ? 'NA' : Number(n.deltaHR).toFixed(3);
+    const cna = n.cna ? "YES (p≤0.05)" : "NO";
+    const cna_p = n.cna_p ?? "NA";
+    const start = (n.start  == null) ? 'NA' : n.start;
+    const end   = (n.end    == null) ? 'NA' : n.end;
+
+    info.innerHTML =
+      `<b>${sym}</b><br>` +
+      `CHR: ${chr}<br>` +
+      `start-end: ${start} - ${end}<br>` +
+      `HR（ET〇）: ${hrOn}<br>` +
+      `HR（ET×）: ${hrOff}<br>` +
+      `deltaHR: ${dhr}<br>` +
+      `<span class="badge">mode color: ${modeLabel()}</span>`+
+      `CNA: ${cna}<br>` +
+      `CNA p-value: ${cna_p}<br>`;
+  }
+
+  // 9) hop focus
+  let activeId = null;
+  let hopK = 1;
+  hopLabel.textContent = `hop: ${hopK}`;
+
+  function resetFocus(){
+    genes.forEach(g=>{
+      const m = nodeMeta[g];
+      const col = colorForGene(geneData[g]);
+      m.sphere.setAttribute('visible', true);
+      m.sphere.setAttribute('color', col);
+      m.sphere.setAttribute('emissive', col);
+      m.sphere.setAttribute('emissive-intensity', String(m.baseEm));
+      m.sphere.setAttribute('scale', '1 1 1');
+      m.label.setAttribute('visible', true);
+    });
+    
+    edgeMeta.forEach(e=>{
+      e.line.setAttribute('visible', true);
+      e.line.setAttribute('vrline', { ...e.line.getAttribute('vrline'), color:'#777', opacity:0.45 });
+      (e.markers||[]).forEach(m=>m.setAttribute('visible', true));
+    });
+  }
+
+  function switchToAfterHiCLayout() {
+  erLoopMeta.forEach(e => {
+    const genes = e.genes || [e.source, e.target].filter(Boolean);
+    if (genes.length < 2) return;
+
+    const g1 = genes[0];
+    const g2 = genes[1];
+
+    const n1 = nodeMeta[g1];
+    const n2 = nodeMeta[g2];
+
+    if (!n1 || !n2) return;
+
+    const p1 = n1.sphere.object3D.position;
+    const p2 = n2.sphere.object3D.position;
+
+    const mid = new THREE.Vector3(
+      (p1.x + p2.x) / 2,
+      (p1.y + p2.y) / 2,
+      (p1.z + p2.z) / 2
+    );
+
+    const afterP1 = {
+      x: p1.x + (mid.x - p1.x) * 0.5,
+      y: p1.y + (mid.y - p1.y) * 0.5,
+      z: p1.z + (mid.z - p1.z) * 0.5
+    };
+
+    const afterP2 = {
+      x: p2.x + (mid.x - p2.x) * 0.5,
+      y: p2.y + (mid.y - p2.y) * 0.5,
+      z: p2.z + (mid.z - p2.z) * 0.5
+    };
+
+    n1.sphere.setAttribute('position', `${afterP1.x} ${afterP1.y} ${afterP1.z}`);
+    n2.sphere.setAttribute('position', `${afterP2.x} ${afterP2.y} ${afterP2.z}`);
+
+    n1.label.setAttribute('position', `${afterP1.x} ${afterP1.y + 0.4} ${afterP1.z}`);
+    n2.label.setAttribute('position', `${afterP2.x} ${afterP2.y + 0.4} ${afterP2.z}`);
+
+    if (typeof e.line.updateCurve === "function") {
+  e.line.updateCurve(afterP1, afterP2);
+}
+
+    n1.sphere.setAttribute('emissive-intensity', '2.5');
+    n2.sphere.setAttribute('emissive-intensity', '2.5');
+  });
+}
+  function switchToHiCAfterLayout() {
+  const chrShift = {};
+
+  // 1. ER loopから、近づける染色体ペアを集計
+  erLoopMeta.forEach(e => {
+    if (!e.source || !e.target) return;
+
+    const g1 = e.source;
+    const g2 = e.target;
+
+    const n1 = geneData[g1];
+    const n2 = geneData[g2];
+
+    if (!n1 || !n2 || !n1.chr || !n2.chr) return;
+    if (n1.chr === n2.chr) return;
+
+    const chrA = String(n1.chr);
+    const chrB = String(n2.chr);
+
+    if (!chrShift[chrA]) chrShift[chrA] = new THREE.Vector3(0, 0, 0);
+    if (!chrShift[chrB]) chrShift[chrB] = new THREE.Vector3(0, 0, 0);
+
+    const groupA = document.getElementById(`chrGroup_${chrA}`);
+    const groupB = document.getElementById(`chrGroup_${chrB}`);
+
+    if (!groupA || !groupB) return;
+
+    const posA = groupA.object3D.position;
+    const posB = groupB.object3D.position;
+
+    const dirAtoB = new THREE.Vector3(
+      posB.x - posA.x,
+      posB.y - posA.y,
+      posB.z - posA.z
+    );
+
+    if (dirAtoB.length() === 0) return;
+
+    dirAtoB.normalize();
+
+    // 近づける量
+    const strength = 0.8;
+
+    chrShift[chrA].add(dirAtoB.clone().multiplyScalar(strength));
+    chrShift[chrB].add(dirAtoB.clone().multiplyScalar(-strength));
+  });
+
+  // 2. 染色体グループを移動
+  Object.keys(chrShift).forEach(chr => {
+    const group = document.getElementById(`chrGroup_${chr}`);
+    if (!group) return;
+
+    const p = group.object3D.position;
+    const s = chrShift[chr];
+
+    group.setAttribute('animation__hic_after', {
+      property: 'position',
+      to: `${p.x + s.x} ${p.y + s.y} ${p.z + s.z}`,
+      dur: 1600,
+      easing: 'easeInOutQuad'
+    });
+  });
+
+  // 3. ER loopを強調
+  const obj = e.line.getObject3D('mesh');
+if (obj && obj.material) {
+  obj.material.color.set('#00FF99');
+  obj.material.opacity = 1.0;
+  obj.material.needsUpdate = true;
+}
+
+  info.innerHTML += `<br><span class="badge">Hi-C after layout applied</span>`;
+}
+
+  function focusOn(id){
+    if (activeId === id) { activeId = null; resetFocus(); return; }
+    activeId = id;
+    resetFocus();
+
+    const cluster = kHopNodes(id, adjacency, hopK);
+    const neighbors = new Set(adjacency[id] || []);
+    neighbors.add(id);
+
+    genes.forEach(g=>{
+      nodeMeta[g].sphere.setAttribute('visible', false);
+      nodeMeta[g].label.setAttribute('visible', false);
+    });
+
+    cluster.forEach(g=>{
+      const m = nodeMeta[g];
+      if (!m) return;
+      m.sphere.setAttribute('visible', true);
+      m.label.setAttribute('visible', true);
+
+      if (g === id){
+        m.sphere.setAttribute('emissive-intensity', '2.2');
+        m.sphere.setAttribute('scale', '1.5 1.5 1.5');
+      } else {
+        m.sphere.setAttribute('emissive-intensity', '1.2');
+        m.sphere.setAttribute('scale', '1.15 1.15 1.15');
+      }
+    });
+
+    neighbors.forEach(g=>{
+      const m = nodeMeta[g];
+      if (m) m.label.setAttribute('visible', true);
+    });
+
+    edgeMeta.forEach(e=>{
+      const keep = cluster.has(e.source) && cluster.has(e.target);
+      if (keep){
+        e.line.setAttribute('visible', true);
+        e.line.setAttribute('vrline', { ...e.line.getAttribute('vrline'), color:'#FFFF55', opacity:1.0 });
+        (e.markers||[]).forEach(m=>m.setAttribute('visible', true));
+      } else {
+        e.line.setAttribute('visible', false);
+        (e.markers||[]).forEach(m=>m.setAttribute('visible', false));
+      }
+    });
+  }
+
+  // recolor
+  function recolorAll(){
+    genes.forEach(g=>{
+      const m = nodeMeta[g];
+      if (!m) return;
+      const col = colorForGene(geneData[g]);
+      m.sphere.setAttribute('color', col);
+      m.sphere.setAttribute('emissive', col);
+    });
+  }
+  window.recolorAll = recolorAll;
+
+  genes.forEach(g=>{
+    nodeMeta[g].sphere.addEventListener('click', ()=>{
+      showInfo(g);
+      focusOn(g);
+    });
+  });
+
+  hopPlus.addEventListener('click', ()=>{
+    hopK = Math.min(hopK + 1, 6);
+    hopLabel.textContent = `hop: ${hopK}`;
+    if (activeId) focusOn(activeId);
+  });
+  hopMinus.addEventListener('click', ()=>{
+    hopK = Math.max(1, hopK - 1);
+    hopLabel.textContent = `hop: ${hopK}`;
+    if (activeId) focusOn(activeId);
+  });
+
+  resetAll.addEventListener('click', ()=>{
+    activeId = null;
+    hopK = 1;
+    hopLabel.textContent = `hop: ${hopK}`;
+    resetFocus();
+    info.textContent = 'Resetしました。ノードをクリック：hop 以内を表示';
+  });
+
+  afterSim.addEventListener('click', () => {
+  switchToHiCAfterLayout();
+});
+
+  // floor
+  const floor = document.createElement('a-circle');
+  floor.setAttribute('position', '0 0 0');
+  floor.setAttribute('rotation', '-90 0 0');
+  floor.setAttribute('radius', '60');
+  floor.setAttribute('color', '#222');
+  floor.setAttribute('opacity', '0.35');
+  scene.appendChild(floor);
+
+  // 初期
+  setActiveMode(ColorMode.HR_ON);
+  info.innerHTML += `<br>Ready ✅（ノードクリックでhop表示）`;
+}
+
+window.addEventListener('load', ()=>{
+  init().catch(err=>{
+    console.error(err);
+    info.innerHTML =
+      `<b style="color:#ff6b6b">読み込み失敗</b><br>` +
+      `${String(err)}<br><br>` +
+      `対策：HTMLを file:// で開かず、<br>` +
+      `<b>python -m http.server</b> で http://localhost から開いてください。`;
+  });
+});
+</script>
+</body>
+</html>
+
+
