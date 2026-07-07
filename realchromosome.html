@@ -78,6 +78,51 @@
     </a-entity>
   </a-entity>
 
+  <a-entity id="rig" position="0 1.6 16" keyboard-move quest-move>
+  <a-entity id="cam" camera look-controls position="0 0 0"></a-entity>
+
+  <a-entity id="rig"
+          position="0 1.6 16"
+          keyboard-move
+          quest-move
+          quest-controller>
+
+
+
+  <a-entity
+    id="leftHand"
+    oculus-touch-controls="hand: left">
+  </a-entity>
+
+  <a-entity
+    id="rightHand"
+    oculus-touch-controls="hand: right"
+    raycaster="objects: .grabbable; far: 30"
+    line="color: #FFFFFF; opacity: 0.8"
+    quest-grab>
+  </a-entity>
+
+  <a-entity
+    id="leftHand"
+    oculus-touch-controls="hand: left">
+</a-entity>
+
+<a-entity
+    id="rightHand"
+    oculus-touch-controls="hand: right">
+</a-entity>
+
+<a-entity
+    id="rightHand"
+    oculus-touch-controls="hand: right"
+    raycaster="objects: .clickable; far: 100"
+    line="color: white">
+</a-entity>
+
+
+
+</a-entity>
+
   <a-sky color="#111"></a-sky>
 </a-scene>
 
@@ -101,6 +146,69 @@ AFRAME.registerComponent('keyboard-move', {
     const s = dt * 0.004;
     if (this.keys['KeyH']) p.y += s;
     if (this.keys['KeyB']) p.y -= s;
+  }
+});
+
+AFRAME.registerComponent('quest-controller', {
+  init() {
+
+    const rightHand = document.querySelector('#rightHand');
+
+    rightHand.addEventListener('triggerdown', () => {
+
+      const hit = rightHand.components.raycaster.intersections;
+
+      if (!hit || hit.length === 0) return;
+
+      hit[0].object.el.emit('click');
+
+    });
+
+  }
+});
+
+AFRAME.registerComponent('quest-move', {
+  init() {
+    this.moveX = 0;
+    this.moveY = 0;
+
+    const leftHand = document.querySelector('#leftHand');
+
+    leftHand.addEventListener('thumbstickmoved', e => {
+      this.moveX = e.detail.x;
+      this.moveY = e.detail.y;
+    });
+  },
+
+
+
+  tick(t, dt) {
+    const rig = this.el;
+    const cam = document.querySelector('#cam');
+
+    const speed = dt * 0.006;
+
+    // カメラが向いている方向
+    const direction = new THREE.Vector3();
+    cam.object3D.getWorldDirection(direction);
+    direction.y = 0;
+    direction.normalize();
+
+    
+
+    // 横方向
+    const right = new THREE.Vector3();
+    right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
+
+    // 前後移動
+    rig.object3D.position.add(
+      direction.clone().multiplyScalar(-this.moveY * speed)
+    );
+
+    // 左右移動
+    rig.object3D.position.add(
+      right.clone().multiplyScalar(this.moveX * speed)
+    );
   }
 });
 
