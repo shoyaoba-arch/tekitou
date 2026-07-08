@@ -172,46 +172,46 @@ AFRAME.registerComponent('quest-move', {
     this.moveX = 0;
     this.moveY = 0;
 
-    const leftHand = document.querySelector('#leftHand');
+    setTimeout(() => {
+      const leftHand = document.querySelector('#leftHand');
 
-    leftHand.addEventListener('thumbstickmoved', e => {
-      this.moveX = e.detail.x;
-      this.moveY = e.detail.y;
-    });
+      if (!leftHand) {
+        console.warn('leftHand が見つかりません');
+        return;
+      }
+
+      leftHand.addEventListener('thumbstickmoved', e => {
+        this.moveX = e.detail.x;
+        this.moveY = e.detail.y;
+      });
+    }, 1000);
   },
-
-
 
   tick(t, dt) {
     const rig = this.el;
     const cam = document.querySelector('#cam');
 
+    if (!cam) return;
+
     const speed = dt * 0.006;
 
-    // カメラが向いている方向
     const direction = new THREE.Vector3();
     cam.object3D.getWorldDirection(direction);
     direction.y = 0;
     direction.normalize();
 
-    
-
-    // 横方向
     const right = new THREE.Vector3();
     right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
 
-    // 前後移動
     rig.object3D.position.add(
       direction.clone().multiplyScalar(-this.moveY * speed)
     );
 
-    // 左右移動
     rig.object3D.position.add(
       right.clone().multiplyScalar(this.moveX * speed)
     );
   }
 });
-
 /* ===============================
    ラベル前面
 =============================== */
