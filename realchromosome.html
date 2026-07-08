@@ -69,90 +69,48 @@
 <div id="info">ロード中…</div>
 
 <a-scene id="scene" vr-mode-ui="enabled: true">
+  <a-scene id="scene" vr-mode-ui="enabled: true">
   <a-entity light="type: ambient; intensity: 2.4"></a-entity>
   <a-entity light="type: directional; intensity: 1.1" position="1 2 1"></a-entity>
-  
-
-  <a-entity id="rig" position="0 1.6 16" keyboard-move quest-move>
-  <a-entity id="cam" camera look-controls position="0 0 0">
-    <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable; far: 250"></a-entity>
-
-    <a-text
-      id="vr_text"
-      value="VR ready"
-      position="0 -0.25 -2"
-      scale="0.35 0.35 0.35"
-      align="center"
-      color="#ffffff">
-    </a-text>
-  </a-entity>
 
   <a-entity
-    id="leftHand"
-    laser-controls="hand: left"
-    raycaster="objects: .clickable; far: 100"
-    vr-controller>
-  </a-entity>
+    id="rig"
+    position="0 1.6 16"
+    keyboard-move
+    quest-move
+    quest-look>
 
-  <a-entity
-    id="rightHand"
-    laser-controls="hand: right"
-    raycaster="objects: .clickable; far: 100"
-    vr-controller>
-  </a-entity>
-</a-entity>
+    <a-entity id="cam" camera look-controls position="0 0 0">
+      <a-entity cursor="rayOrigin: mouse"
+                raycaster="objects: .clickable; far: 250">
+      </a-entity>
 
-  <a-entity id="rig" position="0 1.6 16" keyboard-move>
-    <a-entity id="cam" camera look-controls wasd-controls="acceleration: 20" position="0 0 0">
-      <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable; far: 250"></a-entity>
+      <a-text
+        id="vr_text"
+        value="VR ready"
+        position="0 -0.25 -2"
+        scale="0.35 0.35 0.35"
+        align="center"
+        color="#ffffff">
+      </a-text>
     </a-entity>
+
+    <a-entity
+      id="leftHand"
+      laser-controls="hand: left"
+      raycaster="objects: .clickable; far: 100"
+      vr-controller>
+    </a-entity>
+
+    <a-entity
+      id="rightHand"
+      laser-controls="hand: right"
+      raycaster="objects: .clickable; far: 100"
+      line="color: white"
+      vr-controller>
+    </a-entity>
+
   </a-entity>
-
-  <a-entity id="rig" position="0 1.6 16" keyboard-move quest-move>
-  <a-entity id="cam" camera look-controls position="0 0 0"></a-entity>
-
-  <a-entity id="rig"
-          position="0 1.6 16"
-          keyboard-move
-          quest-move
-          quest-controller
-          quest-look>
-
-
-
-  <a-entity
-    id="leftHand"
-    oculus-touch-controls="hand: left">
-  </a-entity>
-
-  <a-entity
-    id="rightHand"
-    oculus-touch-controls="hand: right"
-    raycaster="objects: .grabbable; far: 30"
-    line="color: #FFFFFF; opacity: 0.8"
-    quest-grab>
-  </a-entity>
-
-  <a-entity
-    id="leftHand"
-    oculus-touch-controls="hand: left">
-</a-entity>
-
-<a-entity
-    id="rightHand"
-    oculus-touch-controls="hand: right">
-</a-entity>
-
-<a-entity
-    id="rightHand"
-    oculus-touch-controls="hand: right"
-    raycaster="objects: .clickable; far: 100"
-    line="color: white">
-</a-entity>
-
-
-
-</a-entity>
 
   <a-sky color="#111"></a-sky>
 </a-scene>
