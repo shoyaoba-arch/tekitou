@@ -115,7 +115,8 @@
           position="0 1.6 16"
           keyboard-move
           quest-move
-          quest-controller>
+          quest-controller
+          quest-look>
 
 
 
@@ -305,6 +306,28 @@ AFRAME.registerComponent('quest-move', {
     rig.object3D.position.add(
       right.clone().multiplyScalar(-this.moveX * speed)
     );
+  }
+});
+
+AFRAME.registerComponent('quest-look', {
+  init() {
+
+    this.lookX = 0;
+
+    const rightHand = document.querySelector('#rightHand');
+
+    rightHand.addEventListener('thumbstickmoved', e => {
+      this.lookX = e.detail.x;
+    });
+
+  },
+
+  tick(t, dt) {
+
+    const turnSpeed = dt * 0.0025;
+
+    this.el.object3D.rotation.y -= this.lookX * turnSpeed;
+
   }
 });
 
