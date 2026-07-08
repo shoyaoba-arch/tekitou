@@ -71,6 +71,36 @@
 <a-scene id="scene" vr-mode-ui="enabled: true">
   <a-entity light="type: ambient; intensity: 2.4"></a-entity>
   <a-entity light="type: directional; intensity: 1.1" position="1 2 1"></a-entity>
+  
+
+  <a-entity id="rig" position="0 1.6 16" keyboard-move quest-move>
+  <a-entity id="cam" camera look-controls position="0 0 0">
+    <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable; far: 250"></a-entity>
+
+    <a-text
+      id="vr_text"
+      value="VR ready"
+      position="0 -0.25 -2"
+      scale="0.35 0.35 0.35"
+      align="center"
+      color="#ffffff">
+    </a-text>
+  </a-entity>
+
+  <a-entity
+    id="leftHand"
+    laser-controls="hand: left"
+    raycaster="objects: .clickable; far: 100"
+    vr-controller>
+  </a-entity>
+
+  <a-entity
+    id="rightHand"
+    laser-controls="hand: right"
+    raycaster="objects: .clickable; far: 100"
+    vr-controller>
+  </a-entity>
+</a-entity>
 
   <a-entity id="rig" position="0 1.6 16" keyboard-move>
     <a-entity id="cam" camera look-controls wasd-controls="acceleration: 20" position="0 0 0">
@@ -149,6 +179,80 @@ AFRAME.registerComponent('keyboard-move', {
   }
 });
 
+AFRAME.registerComponent("vr-controller", {
+  dependencies: ["raycaster"],
+
+  init: function () {
+    const text = document.getElementById("vr_text");
+
+    if (text) {
+      text.setAttribute("value", "Controller is ready");
+    }
+
+    this.grabbed = null;
+
+    this.el.addEventListener("raycaster-intersection", function (e) {
+      if (text) text.setAttribute("value", "遺伝子を検知中");
+    });
+
+    this.el.addEventListener("raycaster-intersection-cleared", function (e) {
+      if (text) text.setAttribute("value", "遺伝子を探してください");
+    });
+
+    this.el.addEventListener("triggerdown", function (e) {
+      const hit = this.components.raycaster.intersections;
+
+      if (!hit || hit.length === 0) {
+        if (text) text.setAttribute("value", "何も選択されていません");
+        return;
+      }
+
+      const target = hit[0].object.el;
+      const gene = target.getAttribute("data-id");
+
+      if (gene) {
+        if (text) text.setAttribute("value", gene + " を選択");
+
+        // 既存のclick処理をQuestでも使う
+        target.emit("click");
+      }
+    });
+
+    this.el.addEventListener("gripdown", function (e) {
+      const hit = this.components.raycaster.intersections;
+
+      if (!hit || hit.length === 0) return;
+
+      const target = hit[0].object.el;
+
+      if (!target.classList.contains("grabbable")) return;
+
+      this.grabbed = target;
+
+      // コントローラーの子にする＝掴む
+      this.object3D.attach(target.object3D);
+
+      if (text) {
+        const gene = target.getAttribute("data-id") || "object";
+        text.setAttribute("value", gene + " を掴んでいます");
+      }
+    });
+
+    this.el.addEventListener("gripup", function (e) {
+      if (!this.grabbed) return;
+
+      const scene = document.querySelector("a-scene");
+
+      // sceneに戻す＝離す
+      scene.object3D.attach(this.grabbed.object3D);
+
+      if (text) text.setAttribute("value", "離しました");
+
+      this.grabbed = null;
+    });
+  }
+});
+
 AFRAME.registerComponent('quest-controller', {
   init() {
 
@@ -172,26 +276,17 @@ AFRAME.registerComponent('quest-move', {
     this.moveX = 0;
     this.moveY = 0;
 
-    setTimeout(() => {
-      const leftHand = document.querySelector('#leftHand');
+    const leftHand = document.querySelector('#leftHand');
 
-      if (!leftHand) {
-        console.warn('leftHand が見つかりません');
-        return;
-      }
-
-      leftHand.addEventListener('thumbstickmoved', e => {
-        this.moveX = e.detail.x;
-        this.moveY = e.detail.y;
-      });
-    }, 1000);
+    leftHand.addEventListener('thumbstickmoved', e => {
+      this.moveX = e.detail.x;
+      this.moveY = e.detail.y;
+    });
   },
 
   tick(t, dt) {
     const rig = this.el;
     const cam = document.querySelector('#cam');
-
-    if (!cam) return;
 
     const speed = dt * 0.006;
 
@@ -1772,7 +1867,7 @@ info.innerHTML += `<br><span class="badge">ER loops drawn: ${drawnERLoops}</span
     sphere.setAttribute('emissive-intensity', emissivePower);
     sphere.setAttribute('scale', scale);
     sphere.setAttribute('data-id', g);
-    sphere.classList.add('clickable');
+    sphere.classList.add('clickable', 'grabbable');
     scene.appendChild(sphere);
 
     const label = document.createElement('a-entity');
