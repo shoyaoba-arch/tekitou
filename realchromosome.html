@@ -170,38 +170,6 @@ AFRAME.registerComponent('keyboard-move', {
     this.keys = {};
     window.addEventListener('keydown', e => this.keys[e.code] = true);
     window.addEventListener('keyup',   e => this.keys[e.code] = false);
-    this.moveX = 0;
-this.moveY = 0;
-
-// 高さ移動用フラグ
-this.moveUp = false;
-this.moveDown = false;
-
-const leftHand = document.querySelector('#leftHand');
-
-// スティック
-leftHand.addEventListener('thumbstickmoved', e => {
-    this.moveX = e.detail.x;
-    this.moveY = e.detail.y;
-});
-
-// Xボタン：上昇
-leftHand.addEventListener('xbuttondown', () => {
-    this.moveUp = true;
-});
-
-leftHand.addEventListener('xbuttonup', () => {
-    this.moveUp = false;
-});
-
-// Yボタン：下降
-leftHand.addEventListener('ybuttondown', () => {
-    this.moveDown = true;
-});
-
-leftHand.addEventListener('ybuttonup', () => {
-    this.moveDown = false;
-});
   },
   tick(t, dt) {
     const p = this.el.object3D.position;
@@ -361,18 +329,6 @@ AFRAME.registerComponent('always-on-top-text', {
         });
       }
     });
-
-    // 上下移動速度
-const verticalSpeed = dt * 0.004;
-
-if (this.moveUp) {
-    rig.object3D.position.y += verticalSpeed;
-}
-
-if (this.moveDown) {
-    rig.object3D.position.y -= verticalSpeed;
-}
-
   }
 });
 
