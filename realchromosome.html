@@ -69,38 +69,89 @@
 <div id="info">ロード中…</div>
 
 <a-scene id="scene" vr-mode-ui="enabled: true">
-  <a-scene id="scene" vr-mode-ui="enabled: true">
   <a-entity light="type: ambient; intensity: 2.4"></a-entity>
   <a-entity light="type: directional; intensity: 1.1" position="1 2 1"></a-entity>
+  
 
   <a-entity id="rig" position="0 1.6 16" keyboard-move quest-move>
-    <a-entity id="cam" camera look-controls position="0 0 0">
+  <a-entity id="cam" camera look-controls position="0 0 0">
+    <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable; far: 250"></a-entity>
+
+    <a-text
+      id="vr_text"
+      value="VR ready"
+      position="0 -0.25 -2"
+      scale="0.35 0.35 0.35"
+      align="center"
+      color="#ffffff">
+    </a-text>
+  </a-entity>
+
+  <a-entity
+    id="leftHand"
+    laser-controls="hand: left"
+    raycaster="objects: .clickable; far: 100"
+    vr-controller>
+  </a-entity>
+
+  <a-entity
+    id="rightHand"
+    laser-controls="hand: right"
+    raycaster="objects: .clickable; far: 100"
+    vr-controller>
+  </a-entity>
+</a-entity>
+
+  <a-entity id="rig" position="0 1.6 16" keyboard-move>
+    <a-entity id="cam" camera look-controls wasd-controls="acceleration: 20" position="0 0 0">
       <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable; far: 250"></a-entity>
-
-      <a-text
-        id="vr_text"
-        value="VR ready"
-        position="0 -0.25 -2"
-        scale="0.35 0.35 0.35"
-        align="center"
-        color="#ffffff">
-      </a-text>
-    </a-entity>
-
-    <a-entity
-      id="leftHand"
-      laser-controls="hand: left"
-      raycaster="objects: .clickable; far: 100"
-      vr-controller>
-    </a-entity>
-
-    <a-entity
-      id="rightHand"
-      laser-controls="hand: right"
-      raycaster="objects: .clickable; far: 100"
-      vr-controller>
     </a-entity>
   </a-entity>
+
+  <a-entity id="rig" position="0 1.6 16" keyboard-move quest-move>
+  <a-entity id="cam" camera look-controls position="0 0 0"></a-entity>
+
+  <a-entity id="rig"
+          position="0 1.6 16"
+          keyboard-move
+          quest-move
+          quest-controller>
+
+
+
+  <a-entity
+    id="leftHand"
+    oculus-touch-controls="hand: left">
+  </a-entity>
+
+  <a-entity
+    id="rightHand"
+    oculus-touch-controls="hand: right"
+    raycaster="objects: .grabbable; far: 30"
+    line="color: #FFFFFF; opacity: 0.8"
+    quest-grab>
+  </a-entity>
+
+  <a-entity
+    id="leftHand"
+    oculus-touch-controls="hand: left">
+</a-entity>
+
+<a-entity
+    id="rightHand"
+    oculus-touch-controls="hand: right">
+</a-entity>
+
+<a-entity
+    id="rightHand"
+    oculus-touch-controls="hand: right"
+    raycaster="objects: .clickable; far: 100"
+    line="color: white">
+</a-entity>
+
+
+
+</a-entity>
 
   <a-sky color="#111"></a-sky>
 </a-scene>
@@ -202,43 +253,34 @@ AFRAME.registerComponent("vr-controller", {
   }
 });
 
+AFRAME.registerComponent('quest-controller', {
+  init() {
 
+    const rightHand = document.querySelector('#rightHand');
+
+    rightHand.addEventListener('triggerdown', () => {
+
+      const hit = rightHand.components.raycaster.intersections;
+
+      if (!hit || hit.length === 0) return;
+
+      hit[0].object.el.emit('click');
+
+    });
+
+  }
+});
 
 AFRAME.registerComponent('quest-move', {
   init() {
     this.moveX = 0;
     this.moveY = 0;
-    this.lookX = 0;
-
-    this.moveUp = false;
-    this.moveDown = false;
 
     const leftHand = document.querySelector('#leftHand');
-    const rightHand = document.querySelector('#rightHand');
 
     leftHand.addEventListener('thumbstickmoved', e => {
       this.moveX = e.detail.x;
       this.moveY = e.detail.y;
-    });
-
-    leftHand.addEventListener('xbuttondown', () => {
-      this.moveUp = true;
-    });
-
-    leftHand.addEventListener('xbuttonup', () => {
-      this.moveUp = false;
-    });
-
-    leftHand.addEventListener('ybuttondown', () => {
-      this.moveDown = true;
-    });
-
-    leftHand.addEventListener('ybuttonup', () => {
-      this.moveDown = false;
-    });
-
-    rightHand.addEventListener('thumbstickmoved', e => {
-      this.lookX = e.detail.x;
     });
   },
 
@@ -246,11 +288,7 @@ AFRAME.registerComponent('quest-move', {
     const rig = this.el;
     const cam = document.querySelector('#cam');
 
-    if (!cam) return;
-
-    const moveSpeed = dt * 0.006;
-    const verticalSpeed = dt * 0.004;
-    const turnSpeed = dt * 0.0025;
+    const speed = dt * 0.006;
 
     const direction = new THREE.Vector3();
     cam.object3D.getWorldDirection(direction);
@@ -260,28 +298,13 @@ AFRAME.registerComponent('quest-move', {
     const right = new THREE.Vector3();
     right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
 
-    // 左スティック：前後
     rig.object3D.position.add(
-      direction.clone().multiplyScalar(this.moveY * moveSpeed)
+      direction.clone().multiplyScalar(this.moveY * speed)
     );
 
-    // 左スティック：左右
     rig.object3D.position.add(
-      right.clone().multiplyScalar(-this.moveX * moveSpeed)
+      right.clone().multiplyScalar(-this.moveX * speed)
     );
-
-    // X：上昇
-    if (this.moveUp) {
-      rig.object3D.position.y += verticalSpeed;
-    }
-
-    // Y：下降
-    if (this.moveDown) {
-      rig.object3D.position.y -= verticalSpeed;
-    }
-
-    // 右スティック：視点回転
-    rig.object3D.rotation.y -= this.lookX * turnSpeed;
   }
 });
 /* ===============================
