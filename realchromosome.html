@@ -271,42 +271,7 @@ AFRAME.registerComponent('quest-controller', {
   }
 });
 
-AFRAME.registerComponent('quest-move', {
-  init() {
-    this.moveX = 0;
-    this.moveY = 0;
 
-    const leftHand = document.querySelector('#leftHand');
-
-    leftHand.addEventListener('thumbstickmoved', e => {
-      this.moveX = e.detail.x;
-      this.moveY = e.detail.y;
-    });
-  },
-
-  tick(t, dt) {
-    const rig = this.el;
-    const cam = document.querySelector('#cam');
-
-    const speed = dt * 0.006;
-
-    const direction = new THREE.Vector3();
-    cam.object3D.getWorldDirection(direction);
-    direction.y = 0;
-    direction.normalize();
-
-    const right = new THREE.Vector3();
-    right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
-
-    rig.object3D.position.add(
-      direction.clone().multiplyScalar(this.moveY * speed)
-    );
-
-    rig.object3D.position.add(
-      right.clone().multiplyScalar(-this.moveX * speed)
-    );
-  }
-});
 /* ===============================
    ラベル前面
 =============================== */
