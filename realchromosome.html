@@ -69,7 +69,6 @@
 <div id="info">ロード中…</div>
 
 <a-scene id="scene" vr-mode-ui="enabled: true">
-  <a-scene id="scene" vr-mode-ui="enabled: true">
   <a-entity light="type: ambient; intensity: 2.4"></a-entity>
   <a-entity light="type: directional; intensity: 1.1" position="1 2 1"></a-entity>
 
@@ -269,23 +268,31 @@ AFRAME.registerComponent('quest-move', {
 
 AFRAME.registerComponent('quest-look', {
   init() {
-
     this.lookX = 0;
 
     const rightHand = document.querySelector('#rightHand');
+    const text = document.querySelector('#vr_text');
+
+    if (!rightHand) {
+      console.warn('rightHand が見つかりません');
+      return;
+    }
 
     rightHand.addEventListener('thumbstickmoved', e => {
       this.lookX = e.detail.x;
-    });
 
+      if (text) {
+        text.setAttribute('value', `右スティック x=${e.detail.x.toFixed(2)}`);
+      }
+    });
   },
 
   tick(t, dt) {
+    const turnSpeed = dt * 0.004;
 
-    const turnSpeed = dt * 0.0025;
+    if (Math.abs(this.lookX) < 0.1) return;
 
     this.el.object3D.rotation.y -= this.lookX * turnSpeed;
-
   }
 });
 
