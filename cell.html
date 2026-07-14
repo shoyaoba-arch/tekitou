@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
+  <title>VR Cell Explorer - Phase 1</title>
+
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <script src="https://unpkg.com/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+
+  <script>
+    /**
+     * 左スティックによる移動
+     * カメラの向いている方向を基準に前後左右へ移動する。
+     */
+    AFRAME.registerComponent("quest-move", {
+      schema: {
+        speed: {
+          type: "number",
+          default: 0.004
+        }
+      },
+
+      init() {
+        this.moveX = 0;
+        this.moveY = 0;
+
+        const leftHand = document.querySelector("#leftHand");
+
+        if (!leftHand) {
+          console.warn("leftHand が見つかりません");
+          return;
+        }
+
+        leftHand.addEventListener("thumbstickmoved", (event) => {
+          this.moveX = event.detail.x;
+          this.moveY = event.detail.y;
+        });
+      },
+
+      tick(time, deltaTime) {
+        if (
+          Math.abs(this.moveX) < 0.1 &&
+          Math.abs(this.moveY) < 0.1
+        ) {
+          return;
+        }
+
+        const camera = document.querySelector("#camera");
+
+        if (!camera) {
+          return;
+        }
+
+        const rigObject = this.el.object3D;
+        const cameraObject = camera.object3D;
+
+        const forward = new THREE.Vector3();
+        cameraObject.getWorldDirection(forward);
+
+        // 上下方向への移動を防ぐ
+        forward.y = 0;
+        forward.normalize();
+
+        const right = new THREE.Vector3()
+          .crossVectors(forward, new THREE.Vector3(0, 1, 0))
+          .normalize();
+
+        const movement = new THREE.Vector3();
+
+        movement.addScaledVector(
+          forward,
+          -this.moveY * this.data.speed * deltaTime
+        );
+
+        movement.addScaledVector(
+          right,
+          this.moveX * this.data.speed * deltaTime
+        );
+
+        rigObject.position.add(movement);
+      }
+    });
+
+    /**
+     * 右スティックによる視点回転
+     */
+    AFRAME.registerComponent("quest-look", {
+      schema: {
+        speed: {
+          type: "number",
+          default: 0.002
+        }
+      },
+
+      init() {
+        this.lookX = 0;
+
+        const rightHand = document.querySelector("#rightHand");
+
+        if (!rightHand) {
+          console.warn("rightHand が見つかりません");
+          return;
+        }
+
+        rightHand.addEventListener("thumbstickmoved", (event) => {
+          this.lookX = event.detail.x;
+        });
+      },
+
+      tick(time, deltaTime) {
+        if (Math.abs(this.lookX) < 0.15) {
+          return;
+        }
+
+        this.el.object3D.rotation.y -=
+          this.lookX * this.data.speed * deltaTime;
+      }
+    });
+
+    /**
+     * ミトコンドリア風オブジェクトを複数作成
+     * Phase1では細胞内らしさを確認するための仮表示。
+     */
+    AFRAME.registerComponent("create-organelles", {
+      init() {
+        const organelles = [
+          { position: "-6 1 -1", rotation: "20 30 10", scale: "1.7 0.7 0.7" },
+          { position: "5 3 -3", rotation: "-10 50 20", scale: "1.5 0.6 0.6" },
+          { position: "-4 -3 -5", rotation: "40 -20 10", scale: "1.8 0.7 0.7" },
+          { position: "6 -2 1", rotation: "10 70 -20", scale: "1.4 0.6 0.6" },
+          { position: "2 5 2", rotation: "-30 10 30", scale: "1.6 0.65 0.65" },
+          { position: "-7 4 3", rotation: "20 -40 15", scale: "1.4 0.55 0.55" }
+        ];
+
+        organelles.forEach((data) => {
+          const mitochondrion = document.createElement("a-entity");
+
+          mitochondrion.setAttribute("geometry", {
+            primitive: "sphere",
+            segmentsWidth: 32,
+            segmentsHeight: 20
+          });
+
+          mitochondrion.setAttribute("material", {
+            color: "#ff8c69",
+            roughness: 0.65,
+            metalness: 0.05
+          });
+
+          mitochondrion.setAttribute("position", data.position);
+          mitochondrion.setAttribute("rotation", data.rotation);
+          mitochondrion.setAttribute("scale", data.scale);
+
+          this.el.appendChild(mitochondrion);
+        });
+      }
+    });
+
+    /**
+     * 現在位置の表示
+     * PC確認時とVRデバッグ用。
+     */
+    AFRAME.registerComponent("position-monitor", {
+      tick() {
+        const text = document.querySelector("#positionText");
+
+        if (!text) {
+          return;
+        }
+
+        const position = this.el.object3D.position;
+
+        text.setAttribute(
+          "value",
+          `Position\nx: ${position.x.toFixed(1)}\ny: ${position.y.toFixed(1)}\nz: ${position.z.toFixed(1)}`
+        );
+      }
+    });
+
+   /**
+ * 核との距離を監視し、近づいたときだけ入口UIを表示する。
+ */
+AFRAME.registerComponent("nucleus-proximity", {
+  schema: {
+    target: {
+      type: "selector"
+    },
+    showDistance: {
+      type: "number",
+      default: 7
+    },
+    hideDistance: {
+      type: "number",
+      default: 8
+    }
+  },
+
+  init() {
+    this.isVisible = false;
+
+    this.enterPanel = document.querySelector("#enterNucleusPanel");
+    this.distanceText = document.querySelector("#nucleusDistanceText");
+
+    this.playerWorldPosition = new THREE.Vector3();
+    this.targetWorldPosition = new THREE.Vector3();
+
+    if (!this.data.target) {
+      console.warn("核のターゲットが設定されていません");
+    }
+  },
+
+  tick() {
+    if (!this.data.target || !this.enterPanel) {
+      return;
+    }
+
+    this.el.object3D.getWorldPosition(this.playerWorldPosition);
+    this.data.target.object3D.getWorldPosition(this.targetWorldPosition);
+
+    const distance = this.playerWorldPosition.distanceTo(
+      this.targetWorldPosition
+    );
+
+    if (this.distanceText) {
+      this.distanceText.setAttribute(
+        "value",
+        `Distance to nucleus: ${distance.toFixed(1)} m`
+      );
+    }
+
+    if (!this.isVisible && distance <= this.data.showDistance) {
+      this.showPanel();
+    }
+
+    if (this.isVisible && distance >= this.data.hideDistance) {
+      this.hidePanel();
+    }
+  },
+
+  showPanel() {
+    this.isVisible = true;
+
+    this.enterPanel.setAttribute("visible", true);
+    this.enterPanel.setAttribute("animation__show", {
+      property: "scale",
+      from: "0.001 0.001 0.001",
+      to: "1 1 1",
+      dur: 250,
+      easing: "easeOutBack"
+    });
+  },
+
+  hidePanel() {
+    this.isVisible = false;
+
+    this.enterPanel.setAttribute("animation__hide", {
+      property: "scale",
+      from: "1 1 1",
+      to: "0.001 0.001 0.001",
+      dur: 180,
+      easing: "easeInQuad"
+    });
+
+    setTimeout(() => {
+      if (!this.isVisible) {
+        this.enterPanel.setAttribute("visible", false);
+      }
+    }, 180);
+  }
+});
+
+
+/**
+ * 核内シーンへ移動するボタン。
+ */
+AFRAME.registerComponent("enter-nucleus", {
+  init() {
+    this.isLoading = false;
+
+    this.el.addEventListener("click", () => {
+      this.enterNucleus();
+    });
+
+    this.el.addEventListener("mouseenter", () => {
+      this.el.setAttribute("material", "color", "#b77cff");
+      this.el.setAttribute("scale", "1.05 1.05 1.05");
+    });
+
+    this.el.addEventListener("mouseleave", () => {
+      this.el.setAttribute("material", "color", "#8f52d9");
+      this.el.setAttribute("scale", "1 1 1");
+    });
+  },
+
+  enterNucleus() {
+    if (this.isLoading) {
+      return;
+    }
+
+    this.isLoading = true;
+
+    const loadingPanel = document.querySelector("#loadingPanel");
+    const enterPanel = document.querySelector("#enterNucleusPanel");
+
+    if (enterPanel) {
+      enterPanel.setAttribute("visible", false);
+    }
+
+    if (loadingPanel) {
+      loadingPanel.setAttribute("visible", true);
+      loadingPanel.setAttribute("scale", "1 1 1");
+    }
+
+    setTimeout(() => {
+  const rig = document.querySelector("#rig");
+  const cellLayer = document.querySelector("#cellLayer");
+  const chromosomeLayer = document.querySelector("#chromosomeLayer");
+  const enterPanel = document.querySelector("#enterNucleusPanel");
+  const loadingPanel = document.querySelector("#loadingPanel");
+
+  // 細胞表示を消す
+  if (cellLayer) {
+    cellLayer.setAttribute("visible", false);
+  }
+
+  // 核内・染色体表示を出す
+  if (chromosomeLayer) {
+    chromosomeLayer.setAttribute("visible", true);
+  }
+
+  // UIを消す
+  if (enterPanel) {
+    enterPanel.setAttribute("visible", false);
+  }
+
+  if (loadingPanel) {
+    loadingPanel.setAttribute("visible", false);
+  }
+
+  // プレイヤーを核内表示の開始位置へ移動
+  if (rig) {
+    rig.object3D.position.set(0, 1.6, 10);
+    rig.object3D.rotation.set(0, 0, 0);
+  }
+}, 700);
+  }
+});
+
+
+/**
+ * Questの右トリガーで、レーザーが指しているクリック可能物を押す。
+ */
+AFRAME.registerComponent("trigger-click", {
+  init() {
+    this.el.addEventListener("triggerdown", () => {
+      const raycaster = this.el.components.raycaster;
+
+      if (!raycaster) {
+        return;
+      }
+
+      const intersections = raycaster.intersections;
+
+      if (!intersections || intersections.length === 0) {
+        return;
+      }
+
+      const target = intersections[0].object.el;
+
+      if (target && target.classList.contains("clickable")) {
+        target.emit("click");
+      }
+    });
+  }
+});
+
+/**
+ * プレイヤーを核の中心へ自動移動させる演出。
+ */
+AFRAME.registerComponent("nucleus-transition", {
+  schema: {
+    target: {
+      type: "selector"
+    },
+    duration: {
+      type: "number",
+      default: 1800
+    }
+  },
+
+  init() {
+    this.isTransitioning = false;
+    this.startPosition = new THREE.Vector3();
+    this.endPosition = new THREE.Vector3();
+    this.startTime = 0;
+
+    this.fadePanel = document.querySelector("#fadePanel");
+  },
+
+  startTransition() {
+    if (this.isTransitioning || !this.data.target) {
+      return;
+    }
+
+    this.isTransitioning = true;
+    this.startTime = performance.now();
+
+    // 現在のrig位置を保存
+    this.startPosition.copy(this.el.object3D.position);
+
+    // 核のワールド座標を取得
+    this.data.target.object3D.getWorldPosition(this.endPosition);
+
+    // カメラの高さを考慮して、核中心より少し上へ移動
+    this.endPosition.y += 1.6;
+
+    // 移動操作を止める
+    const moveComponent = this.el.components["quest-move"];
+
+    if (moveComponent) {
+      moveComponent.moveX = 0;
+      moveComponent.moveY = 0;
+    }
+  },
+
+  tick() {
+    if (!this.isTransitioning) {
+      return;
+    }
+
+    const elapsed = performance.now() - this.startTime;
+    const progress = Math.min(elapsed / this.data.duration, 1);
+
+    // 滑らかな加減速
+    const easedProgress =
+      progress < 0.5
+        ? 2 * progress * progress
+        : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+    this.el.object3D.position.lerpVectors(
+      this.startPosition,
+      this.endPosition,
+      easedProgress
+    );
+
+    // 終盤で暗転開始
+    if (progress >= 0.65 && this.fadePanel) {
+      const fadeProgress = (progress - 0.65) / 0.35;
+
+      this.fadePanel.setAttribute("material", {
+        color: "#000000",
+        opacity: Math.min(fadeProgress, 1),
+        transparent: true,
+        shader: "flat"
+      });
+
+      this.fadePanel.setAttribute("visible", true);
+    }
+
+    if (progress >= 1) {
+      this.isTransitioning = false;
+
+      setTimeout(() => {
+        window.location.href = "realchromosome.html";
+      }, 250);
+    }
+  }
+});
+
+  </script>
+</head>
+
+<body>
+  <a-scene
+    background="color: #02030a"
+    renderer="colorManagement: true; physicallyCorrectLights: true"
+  >
+    <!-- ============================= -->
+    <!-- 照明 -->
+    <!-- ============================= -->
+
+    <a-entity
+      light="type: ambient; color: #dbe7ff; intensity: 1.5"
+    ></a-entity>
+
+    <a-entity
+      light="type: directional; color: #ffffff; intensity: 1.2"
+      position="-5 10 8"
+    ></a-entity>
+
+    <a-entity
+      light="type: point; color: #9dbdff; intensity: 1.5; distance: 35"
+      position="0 5 5"
+    ></a-entity>
+
+    <!-- ============================= -->
+    <!-- 細胞全体 -->
+    <!-- ============================= -->
+
+    <a-entity id="cellLayer" visible="true"></a-entity>
+    <a-entity id="cell">
+
+      <!-- 細胞質 -->
+      <a-sphere
+        id="cytoplasm"
+        position="0 0 0"
+        radius="11.7"
+        material="
+          color: #5078c8;
+          opacity: 0.07;
+          transparent: true;
+          side: double;
+          depthWrite: false;
+          roughness: 0.9
+        "
+      ></a-sphere>
+
+      <!-- 細胞膜 -->
+      <a-sphere
+        id="cellMembrane"
+        position="0 0 0"
+        radius="12"
+        material="
+          color: #63d8ff;
+          opacity: 0.18;
+          transparent: true;
+          side: double;
+          depthWrite: false;
+          roughness: 0.35;
+          metalness: 0.05
+        "
+      ></a-sphere>
+      </a-entity>
+<!-- cellLayer ここまで -->
+      <!-- ============================= -->
+<!-- 核内・染色体レイヤー -->
+<!-- ============================= -->
+
+<a-entity
+  id="chromosomeLayer"
+  visible="false"
+>
+  <!-- 核内空間の背景 -->
+  <a-sphere
+    radius="30"
+    material="
+      color: #170c26;
+      opacity: 0.35;
+      transparent: true;
+      side: back;
+      depthWrite: false
+    "
+  ></a-sphere>
+
+  <!-- 仮の染色体 -->
+  <a-entity
+    id="temporaryChromosome"
+    position="0 1.6 0"
+  >
+    <a-cylinder
+      position="-0.6 0 0"
+      rotation="0 0 25"
+      radius="0.35"
+      height="5"
+      material="
+        color: #d06cff;
+        emissive: #5a1678;
+        emissiveIntensity: 0.35
+      "
+    ></a-cylinder>
+
+    <a-cylinder
+      position="0.6 0 0"
+      rotation="0 0 -25"
+      radius="0.35"
+      height="5"
+      material="
+        color: #d06cff;
+        emissive: #5a1678;
+        emissiveIntensity: 0.35
+      "
+    ></a-cylinder>
+
+    <a-sphere
+      radius="0.55"
+      material="
+        color: #f0b2ff;
+        emissive: #8c34aa;
+        emissiveIntensity: 0.4
+      "
+    ></a-sphere>
+  </a-entity>
+
+  <a-text
+    value="NUCLEUS / CHROMOSOME VIEW"
+    position="0 5 -2"
+    align="center"
+    width="8"
+    color="#ffffff"
+  ></a-text>
+
+  <a-text
+    value="The real chromosome system will be integrated here."
+    position="0 4.2 -2"
+    align="center"
+    width="6"
+    color="#d8c5ff"
+  ></a-text>
+</a-entity>
+
+      <!-- 細胞膜の輪郭 -->
+      <a-sphere
+        position="0 0 0"
+        radius="12.08"
+        material="
+          color: #8be8ff;
+          opacity: 0.08;
+          transparent: true;
+          side: double;
+          wireframe: true;
+          depthWrite: false
+        "
+      ></a-sphere>
+
+      <!-- ============================= -->
+<!-- 核 -->
+<!-- ============================= -->
+
+<a-entity
+  id="nucleus"
+  position="0 0 -1"
+>
+  <!-- 核内部 -->
+  <a-sphere
+    id="nucleusInterior"
+    radius="4.8"
+    material="
+      color: #8e5ad7;
+      opacity: 0.14;
+      transparent: true;
+      side: double;
+      depthWrite: false;
+      roughness: 0.8
+    "
+  ></a-sphere>
+
+  <!-- 核膜 -->
+  <a-sphere
+    id="nuclearMembrane"
+    radius="5"
+    material="
+      color: #cf92ff;
+      opacity: 0.28;
+      transparent: true;
+      side: double;
+      depthWrite: false;
+      roughness: 0.4
+    "
+  ></a-sphere>
+
+  <!-- 核膜の輪郭 -->
+  <a-sphere
+    radius="5.06"
+    material="
+      color: #e7c2ff;
+      opacity: 0.13;
+      transparent: true;
+      side: double;
+      wireframe: true;
+      depthWrite: false
+    "
+  ></a-sphere>
+
+  <!-- 核小体 -->
+  <a-sphere
+    position="-1.2 0.8 0"
+    radius="1.05"
+    material="
+      color: #c65cff;
+      opacity: 0.7;
+      transparent: true;
+      emissive: #68128f;
+      emissiveIntensity: 0.5
+    "
+  ></a-sphere>
+</a-entity>
+
+      <!-- 仮の細胞小器官 -->
+      <a-entity create-organelles></a-entity>
+    </a-entity>
+<!-- ============================= -->
+<!-- 核入口UI -->
+<!-- ============================= -->
+
+<a-entity
+  id="enterNucleusPanel"
+  position="0 1.7 4.7"
+  visible="false"
+  scale="0.001 0.001 0.001"
+  look-at="[camera]"
+>
+  <!-- 背景 -->
+  <a-plane
+    width="4.4"
+    height="2.2"
+    material="
+      color: #151027;
+      opacity: 0.93;
+      transparent: true;
+      shader: flat
+    "
+  ></a-plane>
+
+  <!-- 枠 -->
+  <a-plane
+    position="0 0 -0.01"
+    width="4.55"
+    height="2.35"
+    material="
+      color: #c996ff;
+      opacity: 0.35;
+      transparent: true;
+      wireframe: true;
+      shader: flat
+    "
+  ></a-plane>
+
+  <!-- タイトル -->
+  <a-text
+    value="NUCLEUS DETECTED"
+    position="0 0.65 0.02"
+    align="center"
+    width="4"
+    color="#ead7ff"
+  ></a-text>
+
+  <!-- 核までの距離 -->
+  <a-text
+    id="nucleusDistanceText"
+    value="Distance to nucleus"
+    position="0 0.2 0.02"
+    align="center"
+    width="3.2"
+    color="#d8c5ff"
+  ></a-text>
+
+  <!-- 核へ入るボタン -->
+  <a-plane
+    id="enterNucleusButton"
+    class="clickable"
+    enter-nucleus
+    position="0 -0.48 0.05"
+    width="2.8"
+    height="0.65"
+    material="
+      color: #8f52d9;
+      opacity: 1;
+      shader: flat
+    "
+  >
+    <a-text
+      value="ENTER NUCLEUS"
+      position="0 0 0.02"
+      align="center"
+      width="3"
+      color="#ffffff"
+    ></a-text>
+  </a-plane>
+
+  <!-- 操作説明 -->
+  <a-text
+    value="Right trigger or mouse click"
+    position="0 -0.94 0.02"
+    align="center"
+    width="2.5"
+    color="#bfaad8"
+  ></a-text>
+</a-entity>
+
+<!-- ============================= -->
+<!-- 読み込み表示 -->
+<!-- ============================= -->
+
+<a-entity
+  id="loadingPanel"
+  position="0 1.6 -2"
+  visible="false"
+  scale="0.001 0.001 0.001"
+>
+  <a-plane
+    width="4"
+    height="1.4"
+    material="
+      color: #080611;
+      opacity: 0.95;
+      transparent: true;
+      shader: flat
+    "
+  ></a-plane>
+
+  <a-text
+    value="Entering nucleus..."
+    position="0 0.15 0.02"
+    align="center"
+    width="3.5"
+    color="#ffffff"
+  ></a-text>
+
+  <a-ring
+    position="0 -0.35 0.03"
+    radius-inner="0.12"
+    radius-outer="0.18"
+    theta-length="270"
+    material="
+      color: #cf92ff;
+      shader: flat
+    "
+    animation="
+      property: rotation;
+      to: 0 0 -360;
+      loop: true;
+      dur: 900;
+      easing: linear
+    "
+  ></a-ring>
+</a-entity>
+    <!-- ============================= -->
+    <!-- ラベル -->
+    <!-- ============================= -->
+
+    <a-entity
+      position="0 7.2 -1"
+      text="
+        value: Nucleus;
+        align: center;
+        width: 6;
+        color: #ffffff
+      "
+    ></a-entity>
+
+    <a-entity
+      position="0 11.5 0"
+      text="
+        value: Cell Membrane;
+        align: center;
+        width: 7;
+        color: #aeefff
+      "
+    ></a-entity>
+
+    <!-- ============================= -->
+    <!-- 操作用Rig -->
+    <!-- ============================= -->
+
+    <a-entity
+  id="rig"
+  position="0 1.6 17"
+  quest-move
+  quest-look
+  position-monitor
+  nucleus-proximity="
+    target: #nucleus;
+    showDistance: 7;
+    hideDistance: 8
+  "
+>
+      <a-camera
+        id="camera"
+        position="0 0 0"
+        look-controls="pointerLockEnabled: true"
+        wasd-controls="acceleration: 35"
+      >
+        <!-- PC用カーソル -->
+        <a-cursor
+          color="#ffffff"
+          fuse="false"
+          raycaster="objects: .clickable"
+        ></a-cursor>
+
+        <!-- 位置表示 -->
+        <a-entity
+          id="positionText"
+          position="-0.75 -0.45 -1.3"
+          text="
+            value: Position;
+            width: 1.3;
+            color: #ffffff;
+            align: left
+          "
+        ></a-entity>
+
+        <!-- 操作説明 -->
+        <a-entity
+          position="0 -0.65 -1.5"
+          text="
+            value: Left stick / WASD: Move\nRight stick / Mouse: Look;
+            align: center;
+            width: 1.8;
+            color: #dce8ff
+          "
+        ></a-entity>
+      </a-camera>
+
+      <a-entity
+        id="leftHand"
+        laser-controls="hand: left"
+        raycaster="objects: .clickable"
+      ></a-entity>
+
+      <a-entity
+  id="rightHand"
+  laser-controls="hand: right"
+  raycaster="
+    objects: .clickable;
+    far: 20;
+    showLine: true
+  "
+  trigger-click
+>  </a-entity>
+</a-entity> 
+
+    <!-- 床の目印 -->
+    <a-circle
+      position="0 -11.8 0"
+      rotation="-90 0 0"
+      radius="4"
+      material="
+        color: #253755;
+        opacity: 0.35;
+        transparent: true;
+        side: double
+      "
+    ></a-circle>
+
+    <!-- 周囲の空間 -->
+    <a-sky color="#02030a"></a-sky>
+  </a-scene>
+</body>
+</html>
