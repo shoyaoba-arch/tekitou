@@ -18,74 +18,150 @@
      * 左スティックによる移動
      * カメラの向いている方向を基準に前後左右へ移動する。
      */
-    AFRAME.registerComponent("quest-move", {
-      schema: {
-        speed: {
-          type: "number",
-          default: 0.004
-        }
-      },
+    /**
+ * 左スティックによる前後左右移動
+ * Xボタンで上昇、Yボタンで下降
+ */
+AFRAME.registerComponent("quest-move", {
+  schema: {
+    speed: {
+      type: "number",
+      default: 0.004
+    },
 
-      init() {
-        this.moveX = 0;
-        this.moveY = 0;
+    verticalSpeed: {
+      type: "number",
+      default: 0.004
+    }
+  },
 
-        const leftHand = document.querySelector("#leftHand");
+  init() {
+    // 左スティックの入力値
+    this.moveX = 0;
+    this.moveY = 0;
 
-        if (!leftHand) {
-          console.warn("leftHand が見つかりません");
-          return;
-        }
+    // 上下移動ボタンの状態
+    this.moveUp = false;
+    this.moveDown = false;
 
-        leftHand.addEventListener("thumbstickmoved", (event) => {
-          this.moveX = event.detail.x;
-          this.moveY = event.detail.y;
-        });
-      },
+    this.leftHand = document.querySelector("#leftHand");
 
-      tick(time, deltaTime) {
-        if (
-          Math.abs(this.moveX) < 0.1 &&
-          Math.abs(this.moveY) < 0.1
-        ) {
-          return;
-        }
+    if (!this.leftHand) {
+      console.warn("leftHand が見つかりません");
+      return;
+    }
 
-        const camera = document.querySelector("#camera");
-
-        if (!camera) {
-          return;
-        }
-
-        const rigObject = this.el.object3D;
-        const cameraObject = camera.object3D;
-
-        const forward = new THREE.Vector3();
-        cameraObject.getWorldDirection(forward);
-
-        // 上下方向への移動を防ぐ
-        forward.y = 0;
-        forward.normalize();
-
-        const right = new THREE.Vector3()
-          .crossVectors(forward, new THREE.Vector3(0, 1, 0))
-          .normalize();
-
-        const movement = new THREE.Vector3();
-
-        movement.addScaledVector(
-          forward,
-          -this.moveY * this.data.speed * deltaTime
-        );
-
-        movement.addScaledVector(
-          right,
-          this.moveX * this.data.speed * deltaTime
-        );
-
-        rigObject.position.add(movement);
-      }
+    // 左スティック
+    this.leftHand.addEventListener("thumbstickmoved", (event) => {
+      this.moveX = event.detail.x;
+      this.moveY = event.detail.y;
     });
+
+    // Xボタン：上昇
+    this.leftHand.addEventListener("xbuttondown", () => {
+      this.moveUp = true;
+    });
+
+    this.leftHand.addEventListener("xbuttonup", () => {
+      this.moveUp = false;
+    });
+
+    // Yボタン：下降
+    this.leftHand.addEventListener("ybuttondown", () => {
+      this.moveDown = true;
+    });
+
+    this.leftHand.addEventListener("ybuttonup", () => {
+      this.moveDown = false;
+    });
+  },
+
+  tick(time, deltaTime) {
+    const camera = document.querySelector("#camera");
+
+    if (!camera) {
+      return;
+    }
+
+    const rigObject = this.el.object3D;
+    const cameraObject = camera.object3D;
+
+    /*
+     * 前後方向を取得
+     * 頭の上下角度は移動方向に反映しない
+     */
+    const forward = new THREE.Vector3();
+
+    cameraObject.getWorldDirection(forward);
+
+    forward.y = 0;
+
+    // 真上・真下を向いたときの対策
+    if (forward.lengthSq() > 0.0001) {
+      forward.normalize();
+    } else {
+      forward.set(0, 0, -1);
+    }
+
+    /*
+     * 右方向を取得
+     */
+    const right = new THREE.Vector3()
+      .crossVectors(
+        forward,
+        new THREE.Vector3(0, 1, 0)
+      )
+      .normalize();
+
+    /*
+     * 前後左右の移動量
+     */
+    const movement = new THREE.Vector3();
+
+    if (
+      Math.abs(this.moveX) >= 0.1 ||
+      Math.abs(this.moveY) >= 0.1
+    ) {
+      movement.addScaledVector(
+        forward,
+        -this.moveY * this.data.speed * deltaTime
+      );
+
+      movement.addScaledVector(
+        right,
+        this.moveX * this.data.speed * deltaTime
+      );
+
+      rigObject.position.add(movement);
+    }
+
+    /*
+     * Xボタンで上昇
+     */
+    if (this.moveUp) {
+      rigObject.position.y +=
+        this.data.verticalSpeed * deltaTime;
+    }
+
+    /*
+     * Yボタンで下降
+     */
+    if (this.moveDown) {
+      rigObject.position.y -=
+        this.data.verticalSpeed * deltaTime;
+    }
+  },
+
+  remove() {
+    /*
+     * コンポーネント削除時に入力状態をリセット
+     */
+    this.moveX = 0;
+    this.moveY = 0;
+    this.moveUp = false;
+    this.moveDown = false;
+  }
+});
 
     /**
      * 右スティックによる視点回転
@@ -186,26 +262,33 @@
    /**
  * 核との距離を監視し、近づいたときだけ入口UIを表示する。
  */
+/**
+ * 核との距離を監視し、近づいたときだけ入口UIを表示する。
+ */
 AFRAME.registerComponent("nucleus-proximity", {
   schema: {
     target: {
       type: "selector"
     },
+
     showDistance: {
       type: "number",
-      default: 7
+      default: 9
     },
+
     hideDistance: {
       type: "number",
-      default: 8
+      default: 11
     }
   },
 
   init() {
     this.isVisible = false;
+    this.hideTimer = null;
 
     this.enterPanel = document.querySelector("#enterNucleusPanel");
     this.distanceText = document.querySelector("#nucleusDistanceText");
+    this.camera = document.querySelector("#camera");
 
     this.playerWorldPosition = new THREE.Vector3();
     this.targetWorldPosition = new THREE.Vector3();
@@ -213,15 +296,33 @@ AFRAME.registerComponent("nucleus-proximity", {
     if (!this.data.target) {
       console.warn("核のターゲットが設定されていません");
     }
+
+    if (!this.camera) {
+      console.warn("camera が見つかりません");
+    }
+
+    if (!this.enterPanel) {
+      console.warn("enterNucleusPanel が見つかりません");
+    }
   },
 
   tick() {
-    if (!this.data.target || !this.enterPanel) {
+    if (
+      !this.data.target ||
+      !this.enterPanel ||
+      !this.camera
+    ) {
       return;
     }
 
-    this.el.object3D.getWorldPosition(this.playerWorldPosition);
-    this.data.target.object3D.getWorldPosition(this.targetWorldPosition);
+    // Questではrigではなく、実際のカメラ位置を取得する
+    this.camera.object3D.getWorldPosition(
+      this.playerWorldPosition
+    );
+
+    this.data.target.object3D.getWorldPosition(
+      this.targetWorldPosition
+    );
 
     const distance = this.playerWorldPosition.distanceTo(
       this.targetWorldPosition
@@ -234,11 +335,17 @@ AFRAME.registerComponent("nucleus-proximity", {
       );
     }
 
-    if (!this.isVisible && distance <= this.data.showDistance) {
+    if (
+      !this.isVisible &&
+      distance <= this.data.showDistance
+    ) {
       this.showPanel();
     }
 
-    if (this.isVisible && distance >= this.data.hideDistance) {
+    if (
+      this.isVisible &&
+      distance >= this.data.hideDistance
+    ) {
       this.hidePanel();
     }
   },
@@ -246,35 +353,99 @@ AFRAME.registerComponent("nucleus-proximity", {
   showPanel() {
     this.isVisible = true;
 
-    this.enterPanel.setAttribute("visible", true);
-    this.enterPanel.setAttribute("animation__show", {
-      property: "scale",
-      from: "0.001 0.001 0.001",
-      to: "1 1 1",
-      dur: 250,
-      easing: "easeOutBack"
-    });
+    // 過去の非表示タイマーが残っていたら停止する
+    if (this.hideTimer) {
+      clearTimeout(this.hideTimer);
+      this.hideTimer = null;
+    }
+
+    // カメラの位置と向きを取得する
+    const cameraPosition = new THREE.Vector3();
+    const cameraDirection = new THREE.Vector3();
+
+    this.camera.object3D.getWorldPosition(
+      cameraPosition
+    );
+
+    this.camera.object3D.getWorldDirection(
+      cameraDirection
+    );
+
+    cameraDirection.normalize();
+
+    // カメラの2.5m前にUIを配置する
+    const panelPosition = cameraPosition
+      .clone()
+      .add(
+        cameraDirection.multiplyScalar(2.5)
+      );
+
+    this.enterPanel.object3D.position.copy(
+      panelPosition
+    );
+
+    // 古い非表示アニメーションを削除する
+    this.enterPanel.removeAttribute(
+      "animation__hide"
+    );
+
+    this.enterPanel.setAttribute(
+      "visible",
+      true
+    );
+
+    this.enterPanel.setAttribute(
+      "scale",
+      "0.001 0.001 0.001"
+    );
+
+    this.enterPanel.setAttribute(
+      "animation__show",
+      {
+        property: "scale",
+        from: "0.001 0.001 0.001",
+        to: "1 1 1",
+        dur: 250,
+        easing: "easeOutBack"
+      }
+    );
   },
 
   hidePanel() {
     this.isVisible = false;
 
-    this.enterPanel.setAttribute("animation__hide", {
-      property: "scale",
-      from: "1 1 1",
-      to: "0.001 0.001 0.001",
-      dur: 180,
-      easing: "easeInQuad"
-    });
+    // 古い表示アニメーションを削除する
+    this.enterPanel.removeAttribute(
+      "animation__show"
+    );
 
-    setTimeout(() => {
-      if (!this.isVisible) {
-        this.enterPanel.setAttribute("visible", false);
+    this.enterPanel.setAttribute(
+      "animation__hide",
+      {
+        property: "scale",
+        from: "1 1 1",
+        to: "0.001 0.001 0.001",
+        dur: 180,
+        easing: "easeInQuad"
       }
+    );
+
+    if (this.hideTimer) {
+      clearTimeout(this.hideTimer);
+    }
+
+    this.hideTimer = setTimeout(() => {
+      if (!this.isVisible) {
+        this.enterPanel.setAttribute(
+          "visible",
+          false
+        );
+      }
+
+      this.hideTimer = null;
     }, 180);
   }
 });
-
 
 /**
  * 核内シーンへ移動するボタン。
