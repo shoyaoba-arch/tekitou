@@ -488,37 +488,9 @@ AFRAME.registerComponent("enter-nucleus", {
       loadingPanel.setAttribute("scale", "1 1 1");
     }
 
-    setTimeout(() => {
-  const rig = document.querySelector("#rig");
-  const cellLayer = document.querySelector("#cellLayer");
-  const chromosomeLayer = document.querySelector("#chromosomeLayer");
-  const enterPanel = document.querySelector("#enterNucleusPanel");
-  const loadingPanel = document.querySelector("#loadingPanel");
-
-  // 細胞表示を消す
-  if (cellLayer) {
-    cellLayer.setAttribute("visible", false);
-  }
-
-  // 核内・染色体表示を出す
-  if (chromosomeLayer) {
-    chromosomeLayer.setAttribute("visible", true);
-  }
-
-  // UIを消す
-  if (enterPanel) {
-    enterPanel.setAttribute("visible", false);
-  }
-
-  if (loadingPanel) {
-    loadingPanel.setAttribute("visible", false);
-  }
-
-  // プレイヤーを核内表示の開始位置へ移動
-  if (rig) {
-    rig.object3D.position.set(0, 1.6, 10);
-    rig.object3D.rotation.set(0, 0, 0);
-  }
+    
+setTimeout(() => {
+  window.location.href = "realchromosome.html";
 }, 700);
   }
 });
@@ -647,51 +619,67 @@ AFRAME.registerComponent("nucleus-transition", {
   }
 });
 
-
-function createChromosomeOverview(){
+function createChromosomeOverview() {
 
     const container =
         document.querySelector("#chromosomeContainer");
 
+    if (!container) {
+        console.warn("chromosomeContainer が見つかりません");
+        return;
+    }
+
     const radius = 5;
 
-    for(let i=1;i<=22;i++){
+    for (let i = 1; i <= 22; i++) {
 
         const angle =
-            Math.PI*2*i/22;
+            Math.PI * 2 * i / 22;
 
         const x =
-            Math.cos(angle)*radius;
+            Math.cos(angle) * radius;
 
         const z =
-            Math.sin(angle)*radius;
+            Math.sin(angle) * radius;
 
+        // 染色体の親エンティティを作成
         const chromosome =
             document.createElement("a-entity");
 
+        // 染色体の位置
         chromosome.setAttribute(
-    "class",
-    "clickable"
-);
+            "position",
+            `${x} 0 ${z}`
+        );
 
-chromosome.setAttribute(
-    "data-chr",
-    i
-);
+        // Questのレーザーで選択可能にする
+        chromosome.setAttribute(
+            "class",
+            "clickable"
+        );
 
-chromosome.addEventListener("click", () => {
-    window.location.href = "realchromosome.html";
-});
+        // 染色体番号
+        chromosome.setAttribute(
+            "data-chr",
+            i
+        );
 
-createSimpleChromosome(
-    chromosome,
-    i
-);
+        // 染色体をクリックしたら詳細画面へ
+        chromosome.addEventListener("click", () => {
+            window.location.href = "realchromosome.html";
+        });
 
-        container.appendChild(chromosome);
+        // X字型染色体を作成
+        createSimpleChromosome(
+            chromosome,
+            i
+        );
 
+        // chromosomeContainerに追加
+        container.appendChild(
+            chromosome
+        );
     }
-
 }
 
   </script>
