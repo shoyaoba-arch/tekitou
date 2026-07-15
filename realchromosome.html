@@ -257,11 +257,11 @@ AFRAME.registerComponent('quest-move', {
     right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
 
     rig.object3D.position.add(
-      direction.clone().multiplyScalar(this.moveY * speed)
+      direction.clone().multiplyScalar(-this.moveY * speed)
     );
 
     rig.object3D.position.add(
-      right.clone().multiplyScalar(-this.moveX * speed)
+      right.clone().multiplyScalar(this.moveX * speed)
     );
   }
 });
@@ -288,7 +288,7 @@ AFRAME.registerComponent('quest-look', {
   },
 
   tick(t, dt) {
-    const turnSpeed = dt * 0.004;
+    const turnSpeed = dt * 0.002;
 
     if (Math.abs(this.lookX) < 0.1) return;
 
@@ -320,6 +320,8 @@ AFRAME.registerComponent('always-on-top-text', {
     });
   }
 });
+
+
 
 /* ===============================
    自前 line（aframe-line-component衝突回避）
@@ -1929,24 +1931,110 @@ info.innerHTML += `<br><span class="badge">ER loops drawn: ${drawnERLoops}</span
   let hopK = 1;
   hopLabel.textContent = `hop: ${hopK}`;
 
-  function resetFocus(){
-    genes.forEach(g=>{
-      const m = nodeMeta[g];
-      const col = colorForGene(geneData[g]);
-      m.sphere.setAttribute('visible', true);
-      m.sphere.setAttribute('color', col);
-      m.sphere.setAttribute('emissive', col);
-      m.sphere.setAttribute('emissive-intensity', String(m.baseEm));
-      m.sphere.setAttribute('scale', '1 1 1');
-      m.label.setAttribute('visible', true);
+  function resetFocus() {
+
+  /*
+   * 全遺伝子を表示
+   */
+  genes.forEach(g => {
+
+    const m = nodeMeta[g];
+
+    if (!m) return;
+
+    const col =
+      colorForGene(geneData[g]);
+
+    m.sphere.setAttribute(
+      'visible',
+      true
+    );
+
+    m.sphere.setAttribute(
+      'color',
+      col
+    );
+
+    m.sphere.setAttribute(
+      'emissive',
+      col
+    );
+
+    m.sphere.setAttribute(
+      'emissive-intensity',
+      String(m.baseEm)
+    );
+
+    m.sphere.setAttribute(
+      'scale',
+      '1 1 1'
+    );
+
+    m.label.setAttribute(
+      'visible',
+      true
+    );
+  });
+
+
+  /*
+   * PPI線を通常状態へ戻す
+   */
+  edgeMeta.forEach(e => {
+
+    e.line.setAttribute(
+      'visible',
+      true
+    );
+
+    const lineObject =
+      e.line.getObject3D('mesh');
+
+    if (lineObject) {
+
+      lineObject.visible = true;
+
+      lineObject.material.color.set(
+        '#777777'
+      );
+
+      lineObject.material.opacity = 0.45;
+
+      lineObject.material.transparent = true;
+
+      lineObject.material.needsUpdate = true;
+    }
+
+    (e.markers || []).forEach(m => {
+      m.setAttribute(
+        'visible',
+        true
+      );
     });
-    
-    edgeMeta.forEach(e=>{
-      e.line.setAttribute('visible', true);
-      e.line.setAttribute('vrline', { ...e.line.getAttribute('vrline'), color:'#777', opacity:0.45 });
-      (e.markers||[]).forEach(m=>m.setAttribute('visible', true));
-    });
-  }
+  });
+
+
+  /*
+   * 緑色ER loopを再表示
+   */
+  erLoopMeta.forEach(e => {
+
+    if (!e.line) return;
+
+    e.line.setAttribute(
+      'visible',
+      true
+    );
+
+    const obj =
+      e.line.getObject3D('mesh');
+
+    if (obj) {
+      obj.visible = true;
+    }
+  });
+}
+
   function switchToBendingHiCAfterLayout() {
   if (localRegionMoved) return;
   localRegionMoved = true;
@@ -2198,54 +2286,285 @@ function moveLocalRegion(region, shift, movedGenes) {
   info.innerHTML += `<br><span class="badge">Hi-C after layout applied</span>`;
 }
 
-  function focusOn(id){
-    if (activeId === id) { activeId = null; resetFocus(); return; }
-    activeId = id;
-    resetFocus();
+  function focusOn(id) {
 
-    const cluster = kHopNodes(id, adjacency, hopK);
-    const neighbors = new Set(adjacency[id] || []);
-    neighbors.add(id);
+  // 選択中の遺伝子を記録
+  activeId = id;
 
-    genes.forEach(g=>{
-      nodeMeta[g].sphere.setAttribute('visible', false);
-      nodeMeta[g].label.setAttribute('visible', false);
-    });
+  /*
+   * =====================================
+   * 1. 選択遺伝子＋直接PPI近傍を取得
+   * =====================================
+   */
 
-    cluster.forEach(g=>{
-      const m = nodeMeta[g];
-      if (!m) return;
-      m.sphere.setAttribute('visible', true);
-      m.label.setAttribute('visible', true);
+  const directNeighbors =
+    adjacency[id] || [];
 
-      if (g === id){
-        m.sphere.setAttribute('emissive-intensity', '2.2');
-        m.sphere.setAttribute('scale', '1.5 1.5 1.5');
+  const visibleGenes =
+    new Set([
+      id,
+      ...directNeighbors
+    ]);
+
+
+  /*
+   * =====================================
+   * 2. 緑色のER loop / Hi-C線を消す
+   * =====================================
+   */
+
+  erLoopMeta.forEach(e => {
+
+    if (!e.line) return;
+
+    e.line.setAttribute(
+      'visible',
+      false
+    );
+
+    const obj =
+      e.line.getObject3D('mesh');
+
+    if (obj) {
+      obj.visible = false;
+    }
+  });
+
+
+  /*
+   * Hi-C発光領域も消す
+   */
+
+  hideGlowRegions();
+
+
+  /*
+   * =====================================
+   * 3. 遺伝子ノードを絞り込む
+   * =====================================
+   */
+
+  genes.forEach(g => {
+
+    const m =
+      nodeMeta[g];
+
+    if (!m) return;
+
+    /*
+     * 選択遺伝子または直接近傍なら表示
+     */
+
+    if (visibleGenes.has(g)) {
+
+      m.sphere.setAttribute(
+        'visible',
+        true
+      );
+
+      m.label.setAttribute(
+        'visible',
+        true
+      );
+
+      /*
+       * 選択した遺伝子
+       */
+
+      if (g === id) {
+
+        m.sphere.setAttribute(
+          'emissive-intensity',
+          '2.8'
+        );
+
+        m.sphere.setAttribute(
+          'scale',
+          '1.7 1.7 1.7'
+        );
+
       } else {
-        m.sphere.setAttribute('emissive-intensity', '1.2');
-        m.sphere.setAttribute('scale', '1.15 1.15 1.15');
-      }
-    });
 
-    neighbors.forEach(g=>{
-      const m = nodeMeta[g];
-      if (m) m.label.setAttribute('visible', true);
-    });
+        /*
+         * 直接PPI近傍
+         */
 
-    edgeMeta.forEach(e=>{
-      const keep = cluster.has(e.source) && cluster.has(e.target);
-      if (keep){
-        e.line.setAttribute('visible', true);
-        e.line.setAttribute('vrline', { ...e.line.getAttribute('vrline'), color:'#FFFF55', opacity:1.0 });
-        (e.markers||[]).forEach(m=>m.setAttribute('visible', true));
-      } else {
-        e.line.setAttribute('visible', false);
-        (e.markers||[]).forEach(m=>m.setAttribute('visible', false));
+        m.sphere.setAttribute(
+          'emissive-intensity',
+          '1.5'
+        );
+
+        m.sphere.setAttribute(
+          'scale',
+          '1.25 1.25 1.25'
+        );
       }
-    });
+
+    } else {
+
+      /*
+       * 関係ない遺伝子は非表示
+       */
+
+      m.sphere.setAttribute(
+        'visible',
+        false
+      );
+
+      m.label.setAttribute(
+        'visible',
+        false
+      );
+    }
+  });
+
+
+  /*
+   * =====================================
+   * 4. 選択遺伝子に直接つながる
+   *    PPI線だけ表示
+   * =====================================
+   */
+
+  edgeMeta.forEach(e => {
+
+    /*
+     * 選択遺伝子が
+     * source または target にあるPPIだけ
+     */
+
+    const isDirectPPI =
+      e.source === id ||
+      e.target === id;
+
+
+    const lineObject =
+      e.line.getObject3D('mesh');
+
+
+    if (isDirectPPI) {
+
+      /*
+       * PPI線を表示
+       */
+
+      e.line.setAttribute(
+        'visible',
+        true
+      );
+
+      if (lineObject) {
+
+        lineObject.visible = true;
+
+        /*
+         * 黄色で強調
+         */
+
+        lineObject.material.color.set(
+          '#FFFF00'
+        );
+
+        lineObject.material.opacity =
+          1.0;
+
+        lineObject.material.transparent =
+          true;
+
+        /*
+         * 染色体の前面に表示
+         */
+
+        lineObject.material.depthTest =
+          false;
+
+        lineObject.material.depthWrite =
+          false;
+
+        lineObject.renderOrder =
+          10000;
+
+        lineObject.material.needsUpdate =
+          true;
+      }
+
+
+      /*
+       * PPIマーカー
+       */
+
+      (e.markers || []).forEach(m => {
+
+        m.setAttribute(
+          'visible',
+          true
+        );
+
+      });
+
+    } else {
+
+      /*
+       * その他のPPI線を全部消す
+       */
+
+      e.line.setAttribute(
+        'visible',
+        false
+      );
+
+      if (lineObject) {
+
+        lineObject.visible =
+          false;
+
+      }
+
+
+      (e.markers || []).forEach(m => {
+
+        m.setAttribute(
+          'visible',
+          false
+        );
+
+      });
+    }
+  });
+
+
+  /*
+   * =====================================
+   * 5. VRテキスト表示
+   * =====================================
+   */
+
+  const text =
+    document.querySelector(
+      '#vr_text'
+    );
+
+  if (text) {
+
+    text.setAttribute(
+      'value',
+      `${id}: ${directNeighbors.length} direct PPI neighbors`
+    );
   }
 
-  // recolor
+
+  console.log(
+    'Selected gene:',
+    id
+  );
+
+  console.log(
+    'Direct neighbors:',
+    directNeighbors
+  );
+}
+  
+// recolor
   function recolorAll(){
     genes.forEach(g=>{
       const m = nodeMeta[g];
