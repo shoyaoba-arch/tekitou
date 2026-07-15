@@ -229,41 +229,330 @@ AFRAME.registerComponent('quest-controller', {
   }
 });
 
-AFRAME.registerComponent('quest-move', {
+/**
+ * cell.htmlと同じQuest移動操作
+ *
+ * 左スティック：前後左右
+ * Xボタン：上昇
+ * Yボタン：下降
+ */
+AFRAME.registerComponent("quest-move", {
+
+  schema: {
+
+    speed: {
+      type: "number",
+      default: 0.004
+    },
+
+    verticalSpeed: {
+      type: "number",
+      default: 0.004
+    }
+
+  },
+
+
   init() {
+
+    /*
+     * 左スティック入力
+     */
     this.moveX = 0;
     this.moveY = 0;
 
-    const leftHand = document.querySelector('#leftHand');
 
-    leftHand.addEventListener('thumbstickmoved', e => {
-      this.moveX = e.detail.x;
-      this.moveY = e.detail.y;
-    });
+    /*
+     * 上下移動
+     */
+    this.moveUp = false;
+    this.moveDown = false;
+
+
+    /*
+     * 左コントローラー
+     */
+    this.leftHand =
+      document.querySelector(
+        "#leftHand"
+      );
+
+
+    if (!this.leftHand) {
+
+      console.warn(
+        "leftHand が見つかりません"
+      );
+
+      return;
+
+    }
+
+
+    /*
+     * ===============================
+     * 左スティック
+     * ===============================
+     */
+
+    this.leftHand.addEventListener(
+      "thumbstickmoved",
+      (event) => {
+
+        this.moveX =
+          event.detail.x;
+
+        this.moveY =
+          event.detail.y;
+
+      }
+    );
+
+
+    /*
+     * ===============================
+     * Xボタン
+     * 上昇
+     * ===============================
+     */
+
+    this.leftHand.addEventListener(
+      "xbuttondown",
+      () => {
+
+        this.moveUp = true;
+
+      }
+    );
+
+
+    this.leftHand.addEventListener(
+      "xbuttonup",
+      () => {
+
+        this.moveUp = false;
+
+      }
+    );
+
+
+    /*
+     * ===============================
+     * Yボタン
+     * 下降
+     * ===============================
+     */
+
+    this.leftHand.addEventListener(
+      "ybuttondown",
+      () => {
+
+        this.moveDown = true;
+
+      }
+    );
+
+
+    this.leftHand.addEventListener(
+      "ybuttonup",
+      () => {
+
+        this.moveDown = false;
+
+      }
+    );
+
   },
 
-  tick(t, dt) {
-    const rig = this.el;
-    const cam = document.querySelector('#cam');
 
-    const speed = dt * 0.006;
+  tick(time, deltaTime) {
 
-    const direction = new THREE.Vector3();
-    cam.object3D.getWorldDirection(direction);
-    direction.y = 0;
-    direction.normalize();
+    /*
+     * このHTMLでは
+     * cameraのIDが #cam
+     */
+    const camera =
+      document.querySelector(
+        "#cam"
+      );
 
-    const right = new THREE.Vector3();
-    right.crossVectors(direction, new THREE.Vector3(0, 1, 0)).normalize();
 
-    rig.object3D.position.add(
-      direction.clone().multiplyScalar(-this.moveY * speed)
+    if (!camera) {
+      return;
+    }
+
+
+    /*
+     * rigを移動させる
+     */
+    const rigObject =
+      this.el.object3D;
+
+
+    const cameraObject =
+      camera.object3D;
+
+
+    /*
+     * ===============================
+     * カメラの正面方向
+     * ===============================
+     */
+
+    const forward =
+      new THREE.Vector3();
+
+
+    cameraObject.getWorldDirection(
+      forward
     );
 
-    rig.object3D.position.add(
-      right.clone().multiplyScalar(this.moveX * speed)
-    );
+
+    /*
+     * 上下方向は
+     * 前進方向に影響させない
+     */
+    forward.y = 0;
+
+
+    if (
+      forward.lengthSq() > 0.0001
+    ) {
+
+      forward.normalize();
+
+    } else {
+
+      forward.set(
+        0,
+        0,
+        -1
+      );
+
+    }
+
+
+    /*
+     * ===============================
+     * 右方向
+     * ===============================
+     */
+
+    const right =
+      new THREE.Vector3()
+        .crossVectors(
+
+          forward,
+
+          new THREE.Vector3(
+            0,
+            1,
+            0
+          )
+
+        )
+        .normalize();
+
+
+    /*
+     * ===============================
+     * 前後左右移動
+     * ===============================
+     */
+
+    const movement =
+      new THREE.Vector3();
+
+
+    if (
+      Math.abs(this.moveX) >= 0.1 ||
+      Math.abs(this.moveY) >= 0.1
+    ) {
+
+
+      /*
+       * 前後
+       */
+      movement.addScaledVector(
+
+        forward,
+
+        -this.moveY *
+        this.data.speed *
+        deltaTime
+
+      );
+
+
+      /*
+       * 左右
+       */
+      movement.addScaledVector(
+
+        right,
+
+        this.moveX *
+        this.data.speed *
+        deltaTime
+
+      );
+
+
+      rigObject.position.add(
+        movement
+      );
+
+    }
+
+
+    /*
+     * ===============================
+     * Xボタン
+     * 上昇
+     * ===============================
+     */
+
+    if (this.moveUp) {
+
+      rigObject.position.y +=
+
+        this.data.verticalSpeed *
+
+        deltaTime;
+
+    }
+
+
+    /*
+     * ===============================
+     * Yボタン
+     * 下降
+     * ===============================
+     */
+
+    if (this.moveDown) {
+
+      rigObject.position.y -=
+
+        this.data.verticalSpeed *
+
+        deltaTime;
+
+    }
+
+  },
+
+
+  remove() {
+
+    this.moveX = 0;
+    this.moveY = 0;
+
+    this.moveUp = false;
+    this.moveDown = false;
+
   }
+
 });
 
 AFRAME.registerComponent('quest-look', {
