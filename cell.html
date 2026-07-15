@@ -124,12 +124,12 @@ AFRAME.registerComponent("quest-move", {
     ) {
       movement.addScaledVector(
         forward,
-        -this.moveY * this.data.speed * deltaTime
+        this.moveY * this.data.speed * deltaTime
       );
 
       movement.addScaledVector(
         right,
-        this.moveX * this.data.speed * deltaTime
+        -this.moveX * this.data.speed * deltaTime
       );
 
       rigObject.position.add(movement);
@@ -544,7 +544,10 @@ AFRAME.registerComponent("trigger-click", {
 
       const target = intersections[0].object.el;
 
-      if (target && target.classList.contains("clickable")) {
+      if (
+        target &&
+        target.classList.contains("clickable")
+      ) {
         target.emit("click");
       }
     });
@@ -644,6 +647,53 @@ AFRAME.registerComponent("nucleus-transition", {
   }
 });
 
+
+function createChromosomeOverview(){
+
+    const container =
+        document.querySelector("#chromosomeContainer");
+
+    const radius = 5;
+
+    for(let i=1;i<=22;i++){
+
+        const angle =
+            Math.PI*2*i/22;
+
+        const x =
+            Math.cos(angle)*radius;
+
+        const z =
+            Math.sin(angle)*radius;
+
+        const chromosome =
+            document.createElement("a-entity");
+
+        chromosome.setAttribute(
+    "class",
+    "clickable"
+);
+
+chromosome.setAttribute(
+    "data-chr",
+    i
+);
+
+chromosome.addEventListener("click", () => {
+    window.location.href = "realchromosome.html";
+});
+
+createSimpleChromosome(
+    chromosome,
+    i
+);
+
+        container.appendChild(chromosome);
+
+    }
+
+}
+
   </script>
 </head>
 
@@ -714,9 +764,12 @@ AFRAME.registerComponent("nucleus-transition", {
 <!-- ============================= -->
 
 <a-entity
-  id="chromosomeLayer"
-  visible="false"
->
+    id="chromosomeLayer"
+    visible="false">
+
+    <a-entity id="chromosomeContainer"></a-entity>
+
+</a-entity>
   <!-- 核内空間の背景 -->
   <a-sphere
     radius="30"
@@ -1089,11 +1142,11 @@ AFRAME.registerComponent("nucleus-transition", {
   laser-controls="hand: right"
   raycaster="
     objects: .clickable;
-    far: 20;
+    far: 50;
     showLine: true
   "
   trigger-click
->  </a-entity>
+></a-entity>
 </a-entity> 
 
     <!-- 床の目印 -->
